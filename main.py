@@ -12,6 +12,7 @@ app = FastAPI(title="Allocation widget")
 app.include_router(router_widget)
 app.include_router(router_users)
 
+
 if __name__ == '__main__':
     initialize_token()
 

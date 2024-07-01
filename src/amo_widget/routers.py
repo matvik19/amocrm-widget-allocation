@@ -1,16 +1,18 @@
 import datetime
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
 
 from .schemas import *
 from src.amo_widget.token_init import initialize_token
 from .services import *
+from ..database import get_async_session
 
 router = APIRouter(prefix="/widget", tags=["Widget"])
 
 
 @router.patch("/allocation_by_percents")
-async def allocation_new_lead_by_percents(data: AllocationNewLeadByPercentBody):
+async def allocation_new_lead_by_percents(data: AllocationNewLeadByPercentBody, subdomain: str,
+                                          session: AsyncSession = Depends(get_async_session)):
     """Распределение новой сделки по процентам"""
 
     initialize_token()
@@ -180,6 +182,7 @@ async def allocation_all_leads_by_percent(data: AllocationAllByPercentBody):
                 'leads': leads
             }}
 
+
 @router.patch("/allocation_all_leads_by_max_count")
 async def allocation_all_leads_by_max_count(data: AllocationAllByMaxCountBody):
     """Распределение всех сделок по максимальному количеству"""
@@ -241,6 +244,7 @@ async def allocation_all_leads_by_contacts(pipeline_id: int, status_id: int, upd
                 'leads': all_leads
             }}
 
+
 @router.patch("/allocation_all_leads_by_company")
 async def allocation_all_leads_by_companies(pipeline_id: int, status_id: int, update_tasks: bool):
     """Распределение всех сделок по компании"""
@@ -255,7 +259,6 @@ async def allocation_all_leads_by_companies(pipeline_id: int, status_id: int, up
 
         if update_tasks:
             await set_responsible_user_in_task_by_lead([lead], responsible_user)
-
 
 @router.patch("/config_widget")
 async def config_widget(data: ConfigWidgetBody):
@@ -306,7 +309,10 @@ async def trigger():
 
 
 @router.get("/get")
-def get():
-    initialize_token()
-    return get_analytics_by_pipeline()
+async def get(client_id: str, subdomain: str, session: AsyncSession = Depends(get_async_session)):
+    try:
+        await initialize_token(client_id, subdomain, session)
+        return await get_analytics_by_pipeline(subdomain, session)
 
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))

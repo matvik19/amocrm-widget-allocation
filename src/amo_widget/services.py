@@ -1,21 +1,33 @@
 import json
 from typing import List
 
-import aiohttp
 import requests
-from amocrm.v2 import tokens, User, Lead
+from amocrm.v2 import User, Lead
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.amo_widget.utils import get_tokens_from_db
 from src.config import *
 
-# HEADERS = {
-#         "Host": SUBDOMAIN + ".amocrm.ru",
-#         "Content - Length": "0",
-#         "Content - Type": "application / json",
-#         "Authorization": "Bearer " + ACCESS_TOKEN
-#     }
+
+async def get_headers(subdomain: str, session: AsyncSession):
+    tokens_user = await get_tokens_from_db(subdomain, session)
+
+    if tokens_user:
+        access_token, refresh_token = tokens_user[0], tokens_user[1]
+        print(access_token, refresh_token)
+
+        HEADERS = {
+            "Host": subdomain + ".amocrm.ru",
+            "Content - Length": "0",
+            "Content - Type": "application / json",
+            "Authorization": "Bearer " + access_token
+        }
+        return HEADERS
+    else:
+        raise ValueError("User not found or tokens are empty")
 
 
-def get_leads_by_filter(**kwargs) -> List[Lead]:
+async def get_leads_by_filter(subdomain: str, session: AsyncSession, **kwargs) -> List[Lead]:
     """Получение сделок с помощью фильтра"""
 
     """
@@ -33,7 +45,7 @@ def get_leads_by_filter(**kwargs) -> List[Lead]:
     url = f'https://{SUBDOMAIN}.amocrm.ru/api/v4/leads'
 
     # Отправка GET-запроса
-    response = requests.get(url, params=params, headers=HEADERS)
+    response = requests.get(url, params=params, headers=await get_headers(subdomain, session))
 
     # Проверка статуса ответа
     if response.status_code == 200:
@@ -81,11 +93,13 @@ def give_all_tasks_to_responsible_user(new_responsible_user: User, lead: Lead):
         task.save()
 
 
-def get_analytics_by_pipeline():
+async def get_analytics_by_pipeline(subdomain: str, session: AsyncSession):
     """Получение аналитики по воронке"""
-    leads_andrey = get_leads_by_filter(responsible_user_id=5837446, pipeline_id=8319714, status=67829730)
-    leads_dmitry = get_leads_by_filter(responsible_user_id=9606738, pipeline_id=8319714, status=67829730)
-    leads_in_pipeline = get_leads_by_filter(pipeline_id=8319714, status=67829730)
+    leads_andrey = await get_leads_by_filter(subdomain, session, responsible_user_id=5837446, pipeline_id=8319714,
+                                             status=67829730)
+    leads_dmitry = await get_leads_by_filter(subdomain, session, responsible_user_id=9606738, pipeline_id=8319714,
+                                             status=67829730)
+    leads_in_pipeline = await get_leads_by_filter(subdomain, session, pipeline_id=8319714, status=67829730)
 
     print("ВСЕГО СДЕЛОК:", len(leads_in_pipeline))
     print("СДЕЛОК У АНДРЕЯ:", len(leads_andrey))
