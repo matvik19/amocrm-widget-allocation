@@ -1,6 +1,7 @@
 import json
 from typing import List
 
+import aiohttp
 import requests
 from amocrm.v2 import User, Lead
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,13 +9,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.amo_widget.utils import get_tokens_from_db
 from src.config import *
 
+client_session = aiohttp.ClientSession()
+
 
 async def get_headers(subdomain: str, session: AsyncSession):
     tokens_user = await get_tokens_from_db(subdomain, session)
 
     if tokens_user:
-        access_token, refresh_token = tokens_user[0], tokens_user[1]
-        print(access_token, refresh_token)
+        access_token = tokens_user[0]
+        # print(access_token, refresh_token)
 
         HEADERS = {
             "Host": subdomain + ".amocrm.ru",
@@ -106,7 +109,7 @@ async def get_analytics_by_pipeline(subdomain: str, session: AsyncSession):
     print("СДЕЛОК У ДМИТРИЯ:", len(leads_dmitry))
 
 
-async def get_leads_by_filter_async(**kwargs) -> dict:
+async def get_leads_by_filter_async(subdomain: str, session: AsyncSession, **kwargs) -> dict:
     """Асинхронное получение сделок с помощью фильтра"""
 
     """
@@ -115,14 +118,14 @@ async def get_leads_by_filter_async(**kwargs) -> dict:
         filter[pipeline_id] - по воронке
         filter[status] - по статусу
     """
-
+    headers = await get_headers(subdomain, session)
     params = {}
     for filter_name, value in kwargs.items():
         params[f'filter[{filter_name}]'] = value
 
     url = f'https://{SUBDOMAIN}.amocrm.ru/api/v4/leads?with=contacts'
 
-    async with client_session.get(url, params=params, headers=HEADERS) as response:
+    async with client_session.get(url, params=params, headers=headers) as response:
 
         if response.status == 200:
             result_leads = {}
@@ -147,9 +150,10 @@ async def get_leads_by_filter_async(**kwargs) -> dict:
             return {}
 
 
-async def set_responsible_user_in_lead(lead_ids: list, responsible_user_id: int):
+async def set_responsible_user_in_lead(lead_ids: list, responsible_user_id: int, subdomain: str, session: AsyncSession):
     """Изменение ответственного в сделках по списку сделок"""
 
+    headers = await get_headers(subdomain, session)
     url = f'https://{SUBDOMAIN}.amocrm.ru/api/v4/leads'
 
     # Генерируем список с новым ответственным в сделках
@@ -159,12 +163,14 @@ async def set_responsible_user_in_lead(lead_ids: list, responsible_user_id: int)
     } for lead_id in lead_ids])
 
     # Отправляем изменение в amoCRM
-    await client_session.patch(url, headers=HEADERS, data=body)
+    await client_session.patch(url, headers=headers, data=body)
 
 
-async def set_responsible_user_in_task_by_lead(lead_ids: list, responsible_user_id: int):
+async def set_responsible_user_in_task_by_lead(lead_ids: list, responsible_user_id: int,
+                                               subdomain: str, session: AsyncSession):
     """Изменение ответственного в задачах по списку сделок"""
 
+    headers = await get_headers(subdomain, session)
     url = f'https://{SUBDOMAIN}.amocrm.ru/api/v4/tasks'
 
     task_ids = []
@@ -176,7 +182,7 @@ async def set_responsible_user_in_task_by_lead(lead_ids: list, responsible_user_
             'filter[entity_type]': 'leads'
         }
 
-        async with client_session.get(url, headers=HEADERS, params=params) as response:
+        async with client_session.get(url, headers=headers, params=params) as response:
             result_tasks = await response.json(content_type=None)
 
             if result_tasks is None:
@@ -192,7 +198,7 @@ async def set_responsible_user_in_task_by_lead(lead_ids: list, responsible_user_
     } for task_id in task_ids])
 
     # Отправляем изменение в amoCRM
-    await client_session.patch(url, headers=HEADERS, data=body)
+    await client_session.patch(url, headers=headers, data=body)
 
 
 async def get_contacts_by_lead(lead_id: int):

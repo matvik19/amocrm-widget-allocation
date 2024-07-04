@@ -142,10 +142,13 @@ async def allocation_new_lead_by_company(lead_id: int, update_tasks: bool):
 
 
 @router.patch("/allocation_pipeline")
-async def allocation_all_leads_by_percent(data: AllocationAllByPercentBody):
+async def allocation_all_leads_by_percent(
+        data: AllocationAllByPercentBody, client_id: str,
+        subdomain: str, session: AsyncSession = Depends(get_async_session)
+):
     """Распределение по процентам всех сделок в этапе"""
 
-    initialize_token()
+    await initialize_token(client_id, subdomain, session)
     start = datetime.datetime.now()
     data = dict(data)
 
@@ -156,7 +159,7 @@ async def allocation_all_leads_by_percent(data: AllocationAllByPercentBody):
     update_tasks = data.get('update_tasks')
 
     # Получаем список всех сделок
-    leads = list((await get_leads_by_filter_async(pipeline_id=pipeline_id, status=status)).keys())
+    leads = list((await get_leads_by_filter_async(subdomain, session, pipeline_id=pipeline_id, status=status)).keys())
 
     for i, user_id in enumerate(users_ids):
         target_leads_count = int(len(leads) * percents[i] / 100)
@@ -167,10 +170,10 @@ async def allocation_all_leads_by_percent(data: AllocationAllByPercentBody):
             user_leads = leads[:target_leads_count]
             leads = leads[target_leads_count:]
 
-        await set_responsible_user_in_lead(user_leads, user_id)
+        await set_responsible_user_in_lead(user_leads, user_id, subdomain, session)
 
         if update_tasks:
-            await set_responsible_user_in_task_by_lead(user_leads, user_id)
+            await set_responsible_user_in_task_by_lead(user_leads, user_id, subdomain, session)
 
     end = datetime.datetime.now()
 
@@ -260,6 +263,7 @@ async def allocation_all_leads_by_companies(pipeline_id: int, status_id: int, up
         if update_tasks:
             await set_responsible_user_in_task_by_lead([lead], responsible_user)
 
+
 @router.patch("/config_widget")
 async def config_widget(data: ConfigWidgetBody):
     """Настройка виджета (триггера)"""
@@ -312,7 +316,11 @@ async def trigger():
 async def get(client_id: str, subdomain: str, session: AsyncSession = Depends(get_async_session)):
     try:
         await initialize_token(client_id, subdomain, session)
-        return await get_analytics_by_pipeline(subdomain, session)
+        return {
+            "status": "success",
+            "message": None,
+            "data": await get_analytics_by_pipeline(subdomain, session)
+        }
 
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

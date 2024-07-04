@@ -1,6 +1,5 @@
 from amocrm.v2 import tokens
 from amocrm.v2.tokens import MemoryTokensStorage
-from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import REDIRECT_URL, CLIENT_SECRET
