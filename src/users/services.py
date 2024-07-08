@@ -1,11 +1,7 @@
-from amocrm.v2 import tokens
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import HTTPException
 
 from .models import Users
 from .schemas import UserCreate
-from src.config import CLIENT_SECRET, REDIRECT_URL
 
 
 async def create_user(user: UserCreate, session: AsyncSession):

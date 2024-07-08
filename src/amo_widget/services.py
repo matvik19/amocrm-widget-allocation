@@ -1,297 +1,208 @@
-import json
-from typing import List
+import datetime
 
-import aiohttp
-import requests
-from amocrm.v2 import User, Lead
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.amo_widget.utils import get_tokens_from_db
-from src.config import *
-
-client_session = aiohttp.ClientSession()
-
-
-async def get_headers(subdomain: str, session: AsyncSession):
-    tokens_user = await get_tokens_from_db(subdomain, session)
-
-    if tokens_user:
-        access_token = tokens_user[0]
-        # print(access_token, refresh_token)
-
-        HEADERS = {
-            "Host": subdomain + ".amocrm.ru",
-            "Content - Length": "0",
-            "Content - Type": "application / json",
-            "Authorization": "Bearer " + access_token
-        }
-        return HEADERS
-    else:
-        raise ValueError("User not found or tokens are empty")
+from .schemas import *
+from src.amo_widget.token_init import initialize_token
+from .utils import *
+from ..database import get_async_session
 
 
-async def get_leads_by_filter(subdomain: str, session: AsyncSession, **kwargs) -> List[Lead]:
-    """Получение сделок с помощью фильтра"""
+async def allocation_new_lead_by_percents(data: AllocationNewLeadByPercentBody, subdomain: str,
+                                          session: AsyncSession = Depends(get_async_session)):
+    """Распределение новой сделки по процентам"""
 
-    """
-    FILTERS:
-        responsible_user_id - по ответственному
-        pipeline_id - по воронке
-        status - по статусу
-    """
+    initialize_token()
 
-    params = {}
-    for filter_name, value in kwargs.items():
-        params[f'filter[{filter_name}]'] = value
+    data = dict(data)
 
-    # URL для API amoCRM
-    url = f'https://{SUBDOMAIN}.amocrm.ru/api/v4/leads'
+    pipeline_id = data.get('pipeline_id')
+    lead_id = data.get('lead_id')
+    users_ids = data.get('users_ids')
+    percents = data.get('percents')
+    status = data.get('status')
+    update_tasks = data.get('update_tasks')
 
-    # Отправка GET-запроса
-    response = requests.get(url, params=params, headers=await get_headers(subdomain, session))
+    all_leads = list((await get_leads_by_filter_async(pipeline_id=pipeline_id, status=status)).keys())
+    all_leads_count = len(all_leads)
 
-    # Проверка статуса ответа
-    if response.status_code == 200:
-        # Получение моделей User по ID
-        result_leads = []
-        for lead_json in response.json()['_embedded']['leads']:
-            result_leads.append(Lead.objects.get(object_id=lead_json.get('id')))
-        return result_leads
+    for i, user_id in enumerate(users_ids):
+        target_leads_count = int(all_leads_count * percents[i] / 100)
+        user_leads_count = len(await get_leads_by_filter_async(
+            pipeline_id=pipeline_id,
+            status=status,
+            responsible_user_id=user_id,
+        ))
+        if user_leads_count < target_leads_count:
+            await set_responsible_user_in_lead([lead_id], user_id)
 
-    elif response.status_code == 204:
-        print(f'Error: {response.status_code} | Ответ получен без тела')
-        return []
-    else:
-        print(f'Error: {response.status_code}')
-        return []
+        if update_tasks:
+            await set_responsible_user_in_task_by_lead([lead_id], user_id)
 
+        break
 
-def get_my_employments():
-    """Получение всех сотрудников"""
-    return [emp for emp in User.objects.all() if emp.is_active]
+    return {
+        'status': 200,
+        'lead': lead_id,
+    }
 
 
-def get_info_about_tasks_by_lead(lead: Lead):
-    """Получение всей информации о задачах сделки"""
-    tasks = lead.tasks
-    print("ЗАДАЧИ")
-    for t in tasks:
-        print(f'ID: {t.id}')
-        print(f'ОТВЕСТВЕННЫЙ: {t.responsible_user.name}')
-        print(f'СОЗДАТЕЛЬ: {t.created_by.name}')
-        print(f'ОБНОВИЛ: {t.updated_by.name}\n')
+async def allocation_new_lead_by_maximum(data: AllocationNewLeadByMaxCountBody):
+    """Распределение новой сделки по максимальному количеству"""
 
+    initialize_token()
 
-def print_employments():
-    """Вывод все сотрудников"""
-    print("Сотрудники")
-    for emp in get_my_employments():
-        print(emp.id, emp.name)
+    data = dict(data)
 
+    update_tasks = data.get('update_tasks')
+    lead_id = data.get('lead_id')
+    pipeline_id = data.get('pipeline_id')
+    users_ids = data.get('users_ids')
+    status = data.get('status')
+    necessary_quantity_leads = data.get('necessary_quantity_leads')
 
-def give_all_tasks_to_responsible_user(new_responsible_user: User, lead: Lead):
-    """Назначение всех задач сделки пользователю, ответственному за сделку"""
-    for task in lead.tasks:
-        task.responsible_user = new_responsible_user
-        task.save()
+    users_and_necessary_quantity_leads = dict(zip(users_ids, necessary_quantity_leads))
+    users_leads = {user_id: len(await get_leads_by_filter_async(pipeline_id=pipeline_id, status=status,
+                                                                responsible_user_id=user_id)) for user_id in users_ids}
 
+    while users_leads:
+        user_with_min_quantity_leads = min(users_leads, key=users_leads.get)
+        if users_leads[user_with_min_quantity_leads] < users_and_necessary_quantity_leads[user_with_min_quantity_leads]:
+            await set_responsible_user_in_lead([lead_id], user_with_min_quantity_leads)
 
-async def get_analytics_by_pipeline(subdomain: str, session: AsyncSession):
-    """Получение аналитики по воронке"""
-    leads_andrey = await get_leads_by_filter(subdomain, session, responsible_user_id=5837446, pipeline_id=8319714,
-                                             status=67829730)
-    leads_dmitry = await get_leads_by_filter(subdomain, session, responsible_user_id=9606738, pipeline_id=8319714,
-                                             status=67829730)
-    leads_in_pipeline = await get_leads_by_filter(subdomain, session, pipeline_id=8319714, status=67829730)
+            if update_tasks:
+                await set_responsible_user_in_task_by_lead([lead_id], user_with_min_quantity_leads)
 
-    print("ВСЕГО СДЕЛОК:", len(leads_in_pipeline))
-    print("СДЕЛОК У АНДРЕЯ:", len(leads_andrey))
-    print("СДЕЛОК У ДМИТРИЯ:", len(leads_dmitry))
-
-
-async def get_leads_by_filter_async(subdomain: str, session: AsyncSession, **kwargs) -> dict:
-    """Асинхронное получение сделок с помощью фильтра"""
-
-    """
-    FILTERS:
-        filter[responsible_user_id] - по ответственному
-        filter[pipeline_id] - по воронке
-        filter[status] - по статусу
-    """
-    headers = await get_headers(subdomain, session)
-    params = {}
-    for filter_name, value in kwargs.items():
-        params[f'filter[{filter_name}]'] = value
-
-    url = f'https://{SUBDOMAIN}.amocrm.ru/api/v4/leads?with=contacts'
-
-    async with client_session.get(url, params=params, headers=headers) as response:
-
-        if response.status == 200:
-            result_leads = {}
-            response_json = await response.json()
-            for lead_json in response_json['_embedded']['leads']:
-                contacts = lead_json.get('_embedded', {}).get('contacts', [])
-                companies = lead_json.get('_embedded', {}).get('companies', [])
-                contact_id = contacts[0].get('id') if contacts else None
-                company_id = companies[0].get('id') if companies else None
-
-                result_leads[lead_json.get('id')] = {
-                    'contact_id': contact_id,
-                    'company_id': company_id
-                }
-            return result_leads
-
-        elif response.status == 204:
-            print(f'Error: {response.status} | Ответ получен без тела')
-            return {}
+            break
         else:
-            print(f'Error: {response.status}')
-            return {}
+            del users_leads[user_with_min_quantity_leads]
+
+    return {
+        'status': 200,
+        'lead': lead_id
+    }
 
 
-async def set_responsible_user_in_lead(lead_ids: list, responsible_user_id: int, subdomain: str, session: AsyncSession):
-    """Изменение ответственного в сделках по списку сделок"""
+async def allocation_new_lead_by_contacts(lead_id: int, update_tasks: bool):
+    """Распределение новой сделки по контакту"""
 
-    headers = await get_headers(subdomain, session)
-    url = f'https://{SUBDOMAIN}.amocrm.ru/api/v4/leads'
+    initialize_token()
 
-    # Генерируем список с новым ответственным в сделках
-    body = json.dumps([{
-        "id": lead_id,
-        "responsible_user_id": responsible_user_id,
-    } for lead_id in lead_ids])
+    contact_id = (await get_contacts_by_lead(lead_id))
 
-    # Отправляем изменение в amoCRM
-    await client_session.patch(url, headers=headers, data=body)
-
-
-async def set_responsible_user_in_task_by_lead(lead_ids: list, responsible_user_id: int,
-                                               subdomain: str, session: AsyncSession):
-    """Изменение ответственного в задачах по списку сделок"""
-
-    headers = await get_headers(subdomain, session)
-    url = f'https://{SUBDOMAIN}.amocrm.ru/api/v4/tasks'
-
-    task_ids = []
-
-    # Достаем id всех задач из переданных сделок
-    for lead_id in lead_ids:
-        params = {
-            'filter[entity_id]': lead_id,
-            'filter[entity_type]': 'leads'
+    if contact_id:
+        responsible_user = await get_responsible_user_contact(contact_id)
+    else:
+        return {
+            'status': 400,
+            'lead': lead_id,
         }
 
-        async with client_session.get(url, headers=headers, params=params) as response:
-            result_tasks = await response.json(content_type=None)
+    await set_responsible_user_in_lead([lead_id], responsible_user)
 
-            if result_tasks is None:
-                continue
+    if update_tasks:
+        await set_responsible_user_in_task_by_lead([lead_id], responsible_user)
 
-            for task_json in result_tasks['_embedded']['tasks']:
-                task_ids.append(task_json.get('id'))
-
-    # Генерируем список с новым ответственным в задачах
-    body = json.dumps([{
-        "id": task_id,
-        "responsible_user_id": responsible_user_id,
-    } for task_id in task_ids])
-
-    # Отправляем изменение в amoCRM
-    await client_session.patch(url, headers=headers, data=body)
+    return {
+        'status': 200,
+        'lead': lead_id,
+    }
 
 
-async def get_contacts_by_lead(lead_id: int):
-    """Получение контактов сделки по id сделки"""
+async def allocation_new_lead_by_company(data: AllocationNewLeadByCompany, headers: dict):
+    """Распределение новой сделки по компании"""
 
-    url = f'https://{SUBDOMAIN}.amocrm.ru/api/v4/leads/{lead_id}?with=contacts'
+    company_id = await get_company_by_lead(data.lead_id)
 
-    async with client_session.get(url, headers=HEADERS) as response:
+    if company_id:
+        responsible_user = await get_responsible_user_company(company_id, data.subdomain, headers)
+    else:
+        return {
+            'status': 400,
+            'lead': data.lead_id
+        }
 
-        if response.status == 200:
-            data = await response.json()
-            contact = [contact['id'] for contact in data['_embedded']['contacts']][0]
-            return contact
+    await set_responsible_user_in_lead([data.lead_id], responsible_user, data.subdomain, headers)
+
+    if data.update_tasks:
+        await set_responsible_user_in_task_by_lead([data.lead_id], responsible_user,
+                                                   data.subdomain, headers)
+
+
+async def allocation_all_leads_by_percent(
+        data: AllocationAllByPercentBody, headers: dict
+):
+    """Распределение по процентам всех сделок в этапе"""
+
+    start = datetime.datetime.now()
+
+    # Получаем список всех сделок
+    leads = list((await get_leads_by_filter_async(data.subdomain, headers, data.pipeline_id, data.status_id)).keys())
+
+    for i, user_id in enumerate(data.users_ids):
+        target_leads_count = int(len(leads) * data.percents[i] / 100)
+
+        if (i + 1) == len(data.users_ids):
+            user_leads = leads
         else:
-            print(f'Ошибка: {response.status}')
-            return None
+            user_leads = leads[:target_leads_count]
+            leads = leads[target_leads_count:]
+
+        await set_responsible_user_in_lead(user_leads, user_id, data.subdomain, headers)
+
+        if data.update_tasks:
+            await set_responsible_user_in_task_by_lead(user_leads, user_id, data.subdomain, headers)
+
+    end = datetime.datetime.now()
 
 
-async def get_responsible_user_contact(contact_id: int):
-    """Получение ответственного контакта по id"""
+async def allocation_all_leads_by_max_count(data: AllocationAllByMaxCountBody, headers: dict):
+    """Распределение всех сделок по максимальному количеству"""
 
-    url = f'https://{SUBDOMAIN}.amocrm.ru/api/v4/contacts/{contact_id}'
+    start = datetime.datetime.now()
 
-    async with client_session.get(url, headers=HEADERS) as response:
-        data = await response.json()
-        return data['responsible_user_id']
+    # Получаем список всех сделок
+    leads = list((await get_leads_by_filter_async(data.subdomain, headers, data.pipeline_id, data.status_id)).keys())
 
+    for i, user_id in enumerate(data.users_ids):
+        target_leads_count = data.necessary_quantity_leads[i]
 
-async def get_all_contacts():
-    """Получение всех контактов"""
-
-    url = f'https://{SUBDOMAIN}.amocrm.ru/api/v4/contacts'
-
-    async with client_session.get(url, headers=HEADERS) as response:
-
-        if response.status == 200:
-            data = await response.json()
-            contacts = []
-            # Формируем список словарей содержащих id контакта и его ответственного
-            for contact in data['_embedded']['contacts']:
-                contacts.append({
-                    'id': contact['id'],
-                    'responsible_user_id': contact['responsible_user_id'],
-                })
-            return contacts
+        if (i + 1) == len(data.users_ids):
+            user_leads = leads
         else:
-            print(f'Ошибка: {response.status}')
-            return []
+            user_leads = leads[:target_leads_count]
+            leads = leads[target_leads_count:]
+
+        await set_responsible_user_in_lead(user_leads, user_id, data.subdomain, headers)
+
+        if data.update_tasks:
+            await set_responsible_user_in_task_by_lead(user_leads, user_id, data.subdomain, headers)
+
+    end = datetime.datetime.now()
 
 
-async def get_company_by_lead(lead_id: int):
-    """Получение компаний сделки по id сделки"""
+async def allocation_all_leads_by_contacts(data: AllocationAllByCompanyContacts, headers: dict):
+    """Распределение всех сделок по контакту"""
 
-    url = f'https://{SUBDOMAIN}.amocrm.ru/api/v4/leads/{lead_id}?with=companies'
+    all_leads = await get_leads_by_filter_async(data.subdomain, headers, data.pipeline_id, data.status_id)
 
-    async with client_session.get(url, headers=HEADERS) as response:
+    for lead, value in all_leads.items():
+        responsible_user = await get_responsible_user_contact(value['contact_id'], headers, data.subdomain)
+        await set_responsible_user_in_lead([lead], responsible_user, data.subdomain, headers)
 
-        if response.status == 200:
-            data = await response.json()
-            company_id = next(iter(data['_embedded']['companies']), {}).get('id', None)
-            return company_id
-        else:
-            print(f'Ошибка: {response.status}')
-            return None
+        if data.update_tasks:
+            await set_responsible_user_in_task_by_lead([lead], responsible_user, data.subdomain, headers)
 
 
-async def get_responsible_user_company(company_id: int):
-    """Получение ответственного компании по id"""
+async def allocation_all_leads_by_companies(data: AllocationAllByCompanyContacts, headers: dict):
+    """Распределение всех сделок по компании"""
 
-    url = f'https://{SUBDOMAIN}.amocrm.ru/api/v4/companies/{company_id}'
+    all_leads = await get_leads_by_filter_async(data.subdomain, headers, data.pipeline_id, data.status_id)
 
-    async with client_session.get(url, headers=HEADERS) as response:
-        data = await response.json()
-        return data['responsible_user_id']
+    for lead, value in all_leads.items():
+        responsible_user = await get_responsible_user_company(value['company_id'], data.subdomain, headers)
+        await set_responsible_user_in_lead([lead], responsible_user, data.subdomain, headers)
 
-
-async def get_all_companies():
-    """Получение всех компаний"""
-
-    url = f'https://{SUBDOMAIN}.amocrm.ru/api/v4/companies'
-
-    async with client_session.get(url, headers=HEADERS) as response:
-
-        if response.status == 200:
-            data = await response.json()
-            companies = []
-            # Формируем список словарей содержащих id компании и его ответственного
-            for company in data['_embedded']['companies']:
-                companies.append({
-                    'id': company['id'],
-                    'responsible_user_id': company['responsible_user_id'],
-                })
-            return companies
-        else:
-            print(f'Ошибка: {response.status}')
-            return []
+        if data.update_tasks:
+            await set_responsible_user_in_task_by_lead([lead], responsible_user, data.subdomain, headers)

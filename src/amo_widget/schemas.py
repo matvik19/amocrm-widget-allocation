@@ -7,16 +7,18 @@ class AllocationAllByPercentBody(BaseModel):
     pipeline_id: int
     users_ids: List[int]
     percents: List[int]
-    status: int
+    status_id: int
     update_tasks: bool
+    subdomain: str
 
 
 class AllocationAllByMaxCountBody(BaseModel):
     pipeline_id: int
     users_ids: List[int]
     necessary_quantity_leads: List[int]
-    status: int
+    status_id: int
     update_tasks: bool
+    subdomain: str
 
 
 class AllocationNewLeadByPercentBody(BaseModel):
@@ -24,7 +26,7 @@ class AllocationNewLeadByPercentBody(BaseModel):
     pipeline_id: int
     users_ids: List[int]
     percents: List[int]
-    status: int
+    status_id: int
     update_tasks: bool
 
 
@@ -32,12 +34,28 @@ class AllocationNewLeadByMaxCountBody(BaseModel):
     lead_id: int
     pipeline_id: int
     users_ids: List[int]
-    status: int
+    status_id: int
     necessary_quantity_leads: List[int]
+
+
+class AllocationAllByCompanyContacts(BaseModel):
+    pipeline_id: int
+    status_id: int
+    update_tasks: bool
+    subdomain: str
+
+
+class AllocationNewLeadByCompany(BaseModel):
+    lead_id: int
+    update_tasks: bool
+    subdomain: str
 
 
 class ConfigWidgetBody(BaseModel):
     """Тело запроса, который отправляется при настройке виджета"""
+
+    client_id: str
+    subdomain: str
 
     # Режим распределения
     mode: str  # percent - по процентам | # max_count - максимальное число
@@ -55,7 +73,7 @@ class ConfigWidgetBody(BaseModel):
     users_ids: List[int]
     percents: List[int]
     necessary_quantity_leads: List[int] = []
-    status: int
+    status_id: int
 
 
 class TriggerBody(BaseModel):
