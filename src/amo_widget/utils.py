@@ -8,7 +8,7 @@ from typing import List
 
 import aiohttp
 import requests
-from amocrm.v2 import User, Lead
+from amocrm.v2 import User, Lead, Pipeline, Status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import *

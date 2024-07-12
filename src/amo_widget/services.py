@@ -8,6 +8,71 @@ from src.amo_widget.token_init import initialize_token
 from .utils import *
 from ..database import get_async_session
 
+# 24277384 24256610, 24243116, 24243068, 24189748, 24188980, 24188978, 24188976
+
+
+async def get_user_leads_counts(users_ids, pipeline_id, subdomain, headers):
+    user_leads_counts = {}
+    for user_id in users_ids:
+        user_leads = await get_leads_by_filter_async(subdomain, headers, pipeline_id=pipeline_id, responsible_user_id=user_id)
+        user_leads_counts[user_id] = len(user_leads)
+    return user_leads_counts
+
+
+async def allocation_new_lead(data: dict, subdomain: str, headers: dict, session: AsyncSession = Depends(get_async_session)):
+    """Распределение новой сделки по процентам и максимальному количеству"""
+
+    lead_id = data.get('lead_id')
+    users_ids = data.get('users_ids')
+    percents = data.get('percents')
+    max_counts = data.get('max_counts', [])
+    update_tasks = data.get('update_tasks')
+
+    lead_to_allocate = Lead.objects.get(lead_id)
+    print(lead_to_allocate.status.id)
+
+    all_leads = list((await get_leads_by_filter_async(subdomain, headers,
+                                                      pipeline_id=lead_to_allocate.pipeline.id,
+                                                      status_id=lead_to_allocate.status.id)).keys())
+    all_leads_count = len(all_leads)
+
+    user_leads_counts = await get_user_leads_counts(users_ids, lead_to_allocate.pipeline.id, subdomain, headers)
+
+    for i, user_id in enumerate(users_ids):
+        target_leads_count = int(all_leads_count * percents[i] / 100)
+        max_count = max_counts[i] if i < len(max_counts) else None
+
+        # Проверяем возможность назначения новой сделки пользователю
+        if (max_count is None or user_leads_counts[user_id] < max_count) and user_leads_counts[user_id] < target_leads_count:
+            await set_responsible_user_in_lead([lead_id], user_id, subdomain, headers)
+
+            if update_tasks:
+                await set_responsible_user_in_task_by_lead([lead_id], user_id, subdomain, headers)
+
+            return {
+                'status': 200,
+                'lead': lead_id,
+            }
+
+    for i, user_id in enumerate(users_ids):
+        max_count = max_counts[i] if i < len(max_counts) else None
+
+        if max_count is None or user_leads_counts[user_id] < max_count:
+            await set_responsible_user_in_lead([lead_id], user_id, subdomain, headers)
+
+            if update_tasks:
+                await set_responsible_user_in_task_by_lead([lead_id], user_id, subdomain, headers)
+
+            return {
+                'status': 200,
+                'lead': lead_id,
+            }
+
+    return {
+        'status': 400,
+        'message': 'No suitable user found for the lead allocation',
+    }
+
 
 async def allocation_new_lead_by_percents(data: AllocationNewLeadByPercentBody, subdomain: str,
                                           session: AsyncSession = Depends(get_async_session)):

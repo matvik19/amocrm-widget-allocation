@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional, Dict
 
 from pydantic import BaseModel
 
@@ -57,9 +57,6 @@ class ConfigWidgetBody(BaseModel):
     client_id: str
     subdomain: str
 
-    # Режим распределения
-    mode: str  # percent - по процентам | # max_count - максимальное число
-
     # Учитывающиеся факторы
     use_contact: bool
     use_company: bool
@@ -69,11 +66,10 @@ class ConfigWidgetBody(BaseModel):
     accept_to_existing_leads: bool
 
     # Данные для распределения
-    pipeline_id: int
     users_ids: List[int]
     percents: List[int]
-    necessary_quantity_leads: List[int] = []
-    status_id: int
+    lead_id: int
+    max_counts: List[int] | None
 
 
 class TriggerBody(BaseModel):

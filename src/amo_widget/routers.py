@@ -1,6 +1,8 @@
 import datetime
 
+from amocrm.v2.entity.note import _Note
 from fastapi import APIRouter, Depends, HTTPException
+from starlette.concurrency import run_in_threadpool
 
 from .schemas import *
 from src.amo_widget.token_init import initialize_token
@@ -23,36 +25,14 @@ async def config_widget(data: ConfigWidgetBody, session: AsyncSession = Depends(
 
     headers = await get_headers(data.subdomain, access_token)
 
-    if data.accept_to_existing_leads:
+    await allocation_new_lead(params, data.subdomain, headers, session)
 
-        # Основное распределение
-        if data.mode == 'percent':
-            await allocation_all_leads_by_percent(AllocationAllByPercentBody(**params), headers)
+    # Дополнительное распределение
+    if data.use_company:
+        await allocation_all_leads_by_companies(AllocationAllByCompanyContacts(**params), headers)
 
-        elif data.mode == 'max_count':
-            await allocation_all_leads_by_max_count(AllocationAllByMaxCountBody(**params), headers)
-
-        else:
-            return f'Неверно передан режим. Получено: {data.mode}'
-
-        # Дополнительное распределение
-        if data.use_company:
-            await allocation_all_leads_by_companies(AllocationAllByCompanyContacts(**params), headers)
-
-        if data.use_contact:
-            await allocation_all_leads_by_contacts(AllocationAllByCompanyContacts(**params), headers)
-
-    return f'/trigger_allocation?users={data.users_ids}&percents={data.percents}%use_contact={data.use_contact}'
-
-
-@router.patch("/trigger_allocation")
-async def trigger():
-    pass
-
-
-@router.patch("/integration")
-async def trigger():
-    pass
+    if data.use_contact:
+        await allocation_all_leads_by_contacts(AllocationAllByCompanyContacts(**params), headers)
 
 
 @router.get("/get")
@@ -62,10 +42,11 @@ async def get(client_id: str, subdomain: str, session: AsyncSession = Depends(ge
         access_token = tokens[0]
         headers = await get_headers(subdomain, access_token)
         await initialize_token(client_id, subdomain, session)
+
         return {
             "status": "success",
             "message": None,
-            "data": await get_leads_by_filter_async(subdomain, headers, pipeline_id=8319714, status_id=67829730)
+            "data": None
         }
 
     except ValueError as e:
