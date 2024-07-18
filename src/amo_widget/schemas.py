@@ -38,14 +38,7 @@ class AllocationNewLeadByMaxCountBody(BaseModel):
     necessary_quantity_leads: List[int]
 
 
-class AllocationAllByCompanyContacts(BaseModel):
-    pipeline_id: int
-    status_id: int
-    update_tasks: bool
-    subdomain: str
-
-
-class AllocationNewLeadByCompany(BaseModel):
+class AllocationNewLeadByCompanyContacts(BaseModel):
     lead_id: int
     update_tasks: bool
     subdomain: str
