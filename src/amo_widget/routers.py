@@ -28,14 +28,16 @@ async def config_widget(
     headers = await get_headers(data.subdomain, access_token)
 
     await allocation_new_lead(params, data.subdomain, headers)
+    print("Вышли из распределение процентов")
 
-    if data.use_company:
-        await allocation_new_lead_by_company(
+    if data.use_contact:
+        print("Зашли в распределение по контакту")
+        await allocation_new_lead_by_contacts(
             AllocationNewLeadByCompanyContacts(**params), headers
         )
 
-    if data.use_contact:
-        await allocation_new_lead_by_contacts(
+    if data.use_company:
+        await allocation_new_lead_by_company(
             AllocationNewLeadByCompanyContacts(**params), headers
         )
 

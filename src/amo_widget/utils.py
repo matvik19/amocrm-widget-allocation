@@ -1,6 +1,8 @@
+import pytz
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException
+from datetime import datetime, timedelta
 
 from src.users.models import Users
 import json
@@ -13,7 +15,243 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import *
 
-client_session = aiohttp.ClientSession()
+
+async def get_leads_by_filter_async(
+    subdomain: str,
+    headers: dict,
+    pipeline_id: int,
+    status_id: int = None,
+    responsible_user_id: int = None,
+) -> dict:
+    """Асинхронное получение сделок с помощью фильтра"""
+
+    """
+    FILTERS:
+        filter[responsible_user_id] - по ответственному
+        filter[pipeline_id] - по воронке
+        filter[status] - по статусу
+    """
+
+    client_session = aiohttp.ClientSession()
+
+    params = {"filter[pipeline_id]": pipeline_id}
+    if status_id:
+        params["filter[status]"] = status_id
+    if responsible_user_id:
+        params["filter[responsible_user_id]"] = responsible_user_id
+
+    url = f"https://{subdomain}.amocrm.ru/api/v4/leads?with=contacts"
+
+    async with client_session.get(url, params=params, headers=headers) as response:
+
+        if response.status == 200:
+            result_leads = {}
+            response_json = await response.json()
+            for lead_json in response_json["_embedded"]["leads"]:
+                contacts = lead_json.get("_embedded", {}).get("contacts", [])
+                companies = lead_json.get("_embedded", {}).get("companies", [])
+                contact_id = contacts[0].get("id") if contacts else None
+                company_id = companies[0].get("id") if companies else None
+
+                result_leads[lead_json.get("id")] = {
+                    "contact_id": contact_id,
+                    "company_id": company_id,
+                }
+            return result_leads
+
+        elif response.status == 204:
+            print(f"Error: {response.status} | Ответ получен без тела")
+            return {}
+        else:
+            print(f"Error: {response.status}")
+            return {}
+
+
+async def get_lead_by_id(lead_id: int, subdomain: str, headers: dict):
+    """Получение объекта сделки по id сделки"""
+
+    client_session = aiohttp.ClientSession()
+    url = f"https://{subdomain}.amocrm.ru/api/v4/leads/{lead_id}"
+
+    async with client_session.get(url, headers=headers) as response:
+        if response.status == 200:
+            data = await response.json()
+            return data
+        else:
+            print(f"Ошибка: {response.status}")
+            return None
+
+
+async def get_lead_with_contact_id(lead_id: int, subdomain: str, headers: dict):
+    """Получение контактов сделки по id сделки"""
+
+    client_session = aiohttp.ClientSession()
+    url = f"https://{subdomain}.amocrm.ru/api/v4/leads/{lead_id}?with=contacts"
+
+    async with client_session.get(url, headers=headers) as response:
+
+        if response.status == 200:
+            data = await response.json()
+            contact = [contact["id"] for contact in data["_embedded"]["contacts"]][0]
+            print(contact)
+            return contact
+        else:
+            print(f"Ошибка: {response.status}")
+            return None
+
+
+async def get_contact_by_id(contact_id: int, subdomain: str, headers: dict):
+    """Получение объекта контакта по айди контакта"""
+
+    client_session = aiohttp.ClientSession()
+    url = f"https://{subdomain}.amocrm.ru/api/v4/contacts/{contact_id}"
+
+    async with client_session.get(url, headers=headers) as response:
+        if response.status == 200:
+            data = await response.json()
+            return data
+        else:
+            print(f"Ошибка: {response.status}")
+            return None
+
+
+async def get_responsible_user_contact(contact_id: int, headers: dict, subdomain: str):
+    """Получение ответственного контакта по id"""
+
+    client_session = aiohttp.ClientSession()
+    url = f"https://{subdomain}.amocrm.ru/api/v4/contacts/{contact_id}"
+
+    async with client_session.get(url, headers=headers) as response:
+        data = await response.json()
+        return data["responsible_user_id"]
+
+
+async def get_all_contacts(subdomain: str, headers: dict):
+    """Получение всех контактов"""
+
+    url = f"https://{subdomain}.amocrm.ru/api/v4/contacts"
+    client_session = aiohttp.ClientSession()
+
+    async with client_session.get(url, headers=headers) as response:
+
+        if response.status == 200:
+            data = await response.json()
+            contacts = []
+            # Формируем список словарей содержащих id контакта и его ответственного
+            for contact in data["_embedded"]["contacts"]:
+                contacts.append(
+                    {
+                        "id": contact["id"],
+                        "responsible_user_id": contact["responsible_user_id"],
+                    }
+                )
+            return contacts
+        else:
+            print(f"Ошибка: {response.status}")
+            return []
+
+
+async def get_lead_with_company_id(lead_id: int, subdomain: str, headers: dict):
+    """Получение компаний сделки по id сделки"""
+
+    client_session = aiohttp.ClientSession()
+    url = f"https://{subdomain}.amocrm.ru/api/v4/leads/{lead_id}?with=companies"
+
+    async with client_session.get(url, headers=headers) as response:
+
+        if response.status == 200:
+            data = await response.json()
+            company_id = next(iter(data["_embedded"]["companies"]), {}).get("id", None)
+            return company_id
+        else:
+            print(f"Ошибка: {response.status}")
+            return None
+
+
+async def get_company_by_id(company_id: int, subdomain: str, headers: dict):
+    client_session = aiohttp.ClientSession()
+    url = f"https://{subdomain}.amocrm.ru/api/v4/companies/{company_id}"
+
+    async with client_session.get(url, headers=headers) as response:
+        if response.status == 200:
+            data = await response.json()
+            return data
+        else:
+            print(f"Ошибка: {response.status}")
+            return None
+
+
+async def get_responsible_user_company(company_id: int, subdomain: str, headers: dict):
+    """Получение ответственного компании по id"""
+
+    client_session = aiohttp.ClientSession()
+    url = f"https://{subdomain}.amocrm.ru/api/v4/companies/{company_id}"
+
+    async with client_session.get(url, headers=headers) as response:
+        data = await response.json()
+        return data["responsible_user_id"]
+
+
+async def set_responsible_user_in_lead(
+    lead_ids: list, responsible_user_id: int, subdomain: str, headers: dict
+):
+    """Изменение ответственного в сделках по списку сделок"""
+
+    client_session = aiohttp.ClientSession()
+
+    url = f"https://{subdomain}.amocrm.ru/api/v4/leads"
+
+    # Генерируем список с новым ответственным в сделках
+    body = json.dumps(
+        [
+            {
+                "id": lead_id,
+                "responsible_user_id": responsible_user_id,
+            }
+            for lead_id in lead_ids
+        ]
+    )
+
+    # Отправляем изменение в amoCRM
+    await client_session.patch(url, headers=headers, data=body)
+
+
+async def set_responsible_user_in_task_by_lead(
+    lead_ids: list, responsible_user_id: int, subdomain: str, headers: dict
+):
+    """Изменение ответственного в задачах по списку сделок"""
+
+    client_session = aiohttp.ClientSession()
+    url = f"https://{subdomain}.amocrm.ru/api/v4/tasks"
+
+    task_ids = []
+
+    # Достаем id всех задач из переданных сделок
+    for lead_id in lead_ids:
+        params = {"filter[entity_id]": lead_id, "filter[entity_type]": "leads"}
+
+        async with client_session.get(url, headers=headers, params=params) as response:
+            result_tasks = await response.json(content_type=None)
+
+            if result_tasks is None:
+                continue
+
+            for task_json in result_tasks["_embedded"]["tasks"]:
+                task_ids.append(task_json.get("id"))
+
+    # Генерируем список с новым ответственным в задачах
+    body = json.dumps(
+        [
+            {
+                "id": task_id,
+                "responsible_user_id": responsible_user_id,
+            }
+            for task_id in task_ids
+        ]
+    )
+
+    # Отправляем изменение в amoCRM
+    await client_session.patch(url, headers=headers, data=body)
 
 
 async def get_tokens_from_db(subdomain: str, session: AsyncSession):
@@ -75,250 +313,12 @@ def give_all_tasks_to_responsible_user(new_responsible_user: User, lead: Lead):
         task.save()
 
 
-async def get_analytics_by_pipeline(subdomain: str, session: AsyncSession):
-    """Получение аналитики по воронке"""
+def is_timestamp_within_range(created_at: int) -> bool:
+    current_time = datetime.now(pytz.UTC)
+    print(current_time)
+    created_at_time = datetime.fromtimestamp(created_at, pytz.UTC)
+    print(created_at_time)
+    time_difference = current_time - created_at_time
+    print("Разница во времени", abs(time_difference))
 
-    leads_andrey = await get_leads_by_filter_async(
-        subdomain,
-        headers,
-        responsible_user_id=5837446,
-        pipeline_id=8319714,
-        status_id=67829730,
-    )
-    leads_dmitry = await get_leads_by_filter_async(
-        subdomain,
-        session,
-        responsible_user_id=9606738,
-        pipeline_id=8319714,
-        status=67829730,
-    )
-    leads_in_pipeline = await get_leads_by_filter_async(
-        subdomain, session, pipeline_id=8319714, status=67829730
-    )
-
-    print("ВСЕГО СДЕЛОК:", len(leads_in_pipeline))
-    print("СДЕЛОК У АНДРЕЯ:", len(leads_andrey))
-    print("СДЕЛОК У ДМИТРИЯ:", len(leads_dmitry))
-
-
-async def get_leads_by_filter_async(
-    subdomain: str,
-    headers: dict,
-    pipeline_id: int,
-    status_id: int = None,
-    responsible_user_id: int = None,
-) -> dict:
-    """Асинхронное получение сделок с помощью фильтра"""
-
-    """
-    FILTERS:
-        filter[responsible_user_id] - по ответственному
-        filter[pipeline_id] - по воронке
-        filter[status] - по статусу
-    """
-
-    params = {"filter[pipeline_id]": pipeline_id}
-    if status_id:
-        params["filter[status]"] = status_id
-    if responsible_user_id:
-        params["filter[responsible_user_id]"] = responsible_user_id
-
-    url = f"https://{subdomain}.amocrm.ru/api/v4/leads?with=contacts"
-
-    async with client_session.get(url, params=params, headers=headers) as response:
-
-        if response.status == 200:
-            result_leads = {}
-            response_json = await response.json()
-            for lead_json in response_json["_embedded"]["leads"]:
-                contacts = lead_json.get("_embedded", {}).get("contacts", [])
-                companies = lead_json.get("_embedded", {}).get("companies", [])
-                contact_id = contacts[0].get("id") if contacts else None
-                company_id = companies[0].get("id") if companies else None
-
-                result_leads[lead_json.get("id")] = {
-                    "contact_id": contact_id,
-                    "company_id": company_id,
-                }
-            return result_leads
-
-        elif response.status == 204:
-            print(f"Error: {response.status} | Ответ получен без тела")
-            return {}
-        else:
-            print(f"Error: {response.status}")
-            return {}
-
-
-async def set_responsible_user_in_lead(
-    lead_ids: list, responsible_user_id: int, subdomain: str, headers: dict
-):
-    """Изменение ответственного в сделках по списку сделок"""
-
-    url = f"https://{subdomain}.amocrm.ru/api/v4/leads"
-
-    # Генерируем список с новым ответственным в сделках
-    body = json.dumps(
-        [
-            {
-                "id": lead_id,
-                "responsible_user_id": responsible_user_id,
-            }
-            for lead_id in lead_ids
-        ]
-    )
-
-    # Отправляем изменение в amoCRM
-    await client_session.patch(url, headers=headers, data=body)
-
-
-async def set_responsible_user_in_task_by_lead(
-    lead_ids: list, responsible_user_id: int, subdomain: str, headers: dict
-):
-    """Изменение ответственного в задачах по списку сделок"""
-
-    url = f"https://{subdomain}.amocrm.ru/api/v4/tasks"
-
-    task_ids = []
-
-    # Достаем id всех задач из переданных сделок
-    for lead_id in lead_ids:
-        params = {"filter[entity_id]": lead_id, "filter[entity_type]": "leads"}
-
-        async with client_session.get(url, headers=headers, params=params) as response:
-            result_tasks = await response.json(content_type=None)
-
-            if result_tasks is None:
-                continue
-
-            for task_json in result_tasks["_embedded"]["tasks"]:
-                task_ids.append(task_json.get("id"))
-
-    # Генерируем список с новым ответственным в задачах
-    body = json.dumps(
-        [
-            {
-                "id": task_id,
-                "responsible_user_id": responsible_user_id,
-            }
-            for task_id in task_ids
-        ]
-    )
-
-    # Отправляем изменение в amoCRM
-    await client_session.patch(url, headers=headers, data=body)
-
-
-async def get_contacts_by_lead(lead_id: int, subdomain: str, headers: dict):
-    """Получение контактов сделки по id сделки"""
-
-    url = f"https://{subdomain}.amocrm.ru/api/v4/leads/{lead_id}?with=contacts"
-
-    async with client_session.get(url, headers=headers) as response:
-
-        if response.status == 200:
-            data = await response.json()
-            contact = [contact["id"] for contact in data["_embedded"]["contacts"]][0]
-            print(contact)
-            return contact
-        else:
-            print(f"Ошибка: {response.status}")
-            return None
-
-
-async def get_responsible_user_contact(contact_id: int, headers: dict, subdomain: str):
-    """Получение ответственного контакта по id"""
-
-    url = f"https://{subdomain}.amocrm.ru/api/v4/contacts/{contact_id}"
-
-    async with client_session.get(url, headers=headers) as response:
-        data = await response.json()
-        return data["responsible_user_id"]
-
-
-async def get_all_contacts(subdomain: str, headers: dict):
-    """Получение всех контактов"""
-
-    url = f"https://{subdomain}.amocrm.ru/api/v4/contacts"
-
-    async with client_session.get(url, headers=headers) as response:
-
-        if response.status == 200:
-            data = await response.json()
-            contacts = []
-            # Формируем список словарей содержащих id контакта и его ответственного
-            for contact in data["_embedded"]["contacts"]:
-                contacts.append(
-                    {
-                        "id": contact["id"],
-                        "responsible_user_id": contact["responsible_user_id"],
-                    }
-                )
-            return contacts
-        else:
-            print(f"Ошибка: {response.status}")
-            return []
-
-
-async def get_company_lead(lead_id: int, subdomain: str, headers: dict):
-    """Получение компаний сделки по id сделки"""
-
-    url = f"https://{subdomain}.amocrm.ru/api/v4/leads/{lead_id}?with=companies"
-
-    async with client_session.get(url, headers=headers) as response:
-
-        if response.status == 200:
-            data = await response.json()
-            company_id = next(iter(data["_embedded"]["companies"]), {}).get("id", None)
-            return company_id
-        else:
-            print(f"Ошибка: {response.status}")
-            return None
-
-
-async def get_lead_by_id(lead_id: int, subdomain: str, headers: dict):
-    """Получение объекта сделки по id сделки"""
-
-    url = f"https://{subdomain}.amocrm.ru/api/v4/leads/{lead_id}"
-
-    async with client_session.get(url, headers=headers) as response:
-        if response.status == 200:
-            data = await response.json()
-            return data
-        else:
-            print(f"Ошибка: {response.status}")
-            return None
-
-
-async def get_responsible_user_company(company_id: int, subdomain: str, headers: dict):
-    """Получение ответственного компании по id"""
-
-    url = f"https://{subdomain}.amocrm.ru/api/v4/companies/{company_id}"
-
-    async with client_session.get(url, headers=headers) as response:
-        data = await response.json()
-        return data["responsible_user_id"]
-
-
-async def get_all_companies():
-    """Получение всех компаний"""
-
-    url = f"https://{SUBDOMAIN}.amocrm.ru/api/v4/companies"
-
-    async with client_session.get(url, headers=HEADERS) as response:
-
-        if response.status == 200:
-            data = await response.json()
-            companies = []
-            # Формируем список словарей содержащих id компании и его ответственного
-            for company in data["_embedded"]["companies"]:
-                companies.append(
-                    {
-                        "id": company["id"],
-                        "responsible_user_id": company["responsible_user_id"],
-                    }
-                )
-            return companies
-        else:
-            print(f"Ошибка: {response.status}")
-            return []
+    return abs(time_difference) <= timedelta(seconds=30)

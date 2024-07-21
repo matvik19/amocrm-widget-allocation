@@ -30,7 +30,7 @@ async def update_tokens():
                         refresh_token=new_refresh_token,
                     )
                     await session.execute(stmt)
-                    await session.commit()
+            await session.commit()
 
     except Exception as e:
         ValueError(f"Ошибка записи новых токенов: {e}")

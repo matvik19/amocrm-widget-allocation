@@ -8,9 +8,6 @@ from src.amo_widget.token_init import initialize_token
 from .utils import *
 from ..database import get_async_session
 
-# 24188976, 24188978, 24188980, 24189748, 24243068, 24243116
-# 24256610, 24277384, 24279322, 24279328, 24279654, 24279664
-
 
 async def get_user_leads_counts(users_ids, pipeline_id, subdomain, headers):
     """Получение кол-ва сделок пользователя"""
@@ -49,7 +46,7 @@ async def allocation_new_lead(data: dict, subdomain: str, headers: dict):
     all_leads_count = len(all_leads)
 
     user_leads_counts = await get_user_leads_counts(
-        users_ids, lead_to_allocate.pipeline.id, subdomain, headers
+        users_ids, pipeline_id, subdomain, headers
     )
 
     for i, user_id in enumerate(users_ids):
@@ -99,13 +96,19 @@ async def allocation_new_lead_by_contacts(
 ):
     """Распределение новой сделки по контакту"""
 
-    lead_to_allocate = await get_lead_by_id(data.lead_id, data.subdomain, headers)
-    responsible_user_of_lead = lead_to_allocate.get("responsible_user_id")
-    contact_id_of_lead = await get_contacts_by_lead(
+    contact_id_of_lead = await get_lead_with_contact_id(
         data.lead_id, data.subdomain, headers
     )
+    lead_contact = await get_contact_by_id(contact_id_of_lead, data.subdomain, headers)
+    created_at = lead_contact.get("created_at")
+    print("Время создания контакта", created_at)
+
+    if is_timestamp_within_range(created_at):
+        print("Контакт новый, создался только что. Вышли из распределения")
+        return
 
     if contact_id_of_lead:
+        print("Контакт старый(уже был в базе) начали распределение по контакту")
         responsible_user_of_contact = await get_responsible_user_contact(
             contact_id_of_lead, headers, data.subdomain
         )
@@ -136,9 +139,14 @@ async def allocation_new_lead_by_company(
 ):
     """Распределение новой сделки по компании"""
 
-    company_id = await get_lead_by_id_with_company(
-        data.lead_id, data.subdomain, headers
-    )
+    company_id = await get_lead_with_company_id(data.lead_id, data.subdomain, headers)
+    lead_company = await get_company_by_id(company_id, data.subdomain, headers)
+    created_at = lead_company.get("created_at")
+    print("Время создания компании", created_at)
+
+    if is_timestamp_within_range(created_at):
+        print("Компания новая, создалась только что. Вышли из распределения")
+        return
 
     if company_id:
         responsible_user = await get_responsible_user_company(

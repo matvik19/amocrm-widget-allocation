@@ -22,10 +22,10 @@ app.include_router(router_widget)
 app.include_router(router_users)
 
 
-@app.on_event("startup")
-async def startup_event():
-    print("Запустились")
-    activate_background_task()
+# @app.on_event("startup")
+# async def startup_event():
+#     print("Запустились")
+#     activate_background_task()
 
 
 if __name__ == "__main__":
