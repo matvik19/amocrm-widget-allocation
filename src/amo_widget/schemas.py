@@ -72,3 +72,22 @@ class TriggerBody(BaseModel):
     users_ids: List[int]
     status: int
     necessary_quantity_leads: List[int]
+
+
+class TestBody(BaseModel):
+    client_id: str
+    subdomain: str
+
+    # Учитывающиеся факторы
+    use_contact: bool
+    use_company: bool
+
+    # Дополнительный функционал
+    update_tasks: bool
+    accept_to_existing_leads: bool
+
+    # Данные для распределения
+    users_ids: List[int]
+    percents: List[int]
+    lead_id: int
+    max_counts: List[int] | None

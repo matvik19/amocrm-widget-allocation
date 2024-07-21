@@ -1,4 +1,6 @@
 import pytz
+from typing import AsyncGenerator
+from aiohttp import ClientSession
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException
@@ -16,7 +18,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config import *
 
 
+async def get_client_session() -> AsyncGenerator[aiohttp.ClientSession, None]:
+    async with aiohttp.ClientSession() as session:
+        yield session
+
+
 async def get_leads_by_filter_async(
+    client_session: ClientSession,
     subdomain: str,
     headers: dict,
     pipeline_id: int,
@@ -31,8 +39,6 @@ async def get_leads_by_filter_async(
         filter[pipeline_id] - по воронке
         filter[status] - по статусу
     """
-
-    client_session = aiohttp.ClientSession()
 
     params = {"filter[pipeline_id]": pipeline_id}
     if status_id:
@@ -67,10 +73,11 @@ async def get_leads_by_filter_async(
             return {}
 
 
-async def get_lead_by_id(lead_id: int, subdomain: str, headers: dict):
+async def get_lead_by_id(
+    lead_id: int, subdomain: str, headers: dict, client_session: ClientSession
+):
     """Получение объекта сделки по id сделки"""
 
-    client_session = aiohttp.ClientSession()
     url = f"https://{subdomain}.amocrm.ru/api/v4/leads/{lead_id}"
 
     async with client_session.get(url, headers=headers) as response:
@@ -82,10 +89,11 @@ async def get_lead_by_id(lead_id: int, subdomain: str, headers: dict):
             return None
 
 
-async def get_lead_with_contact_id(lead_id: int, subdomain: str, headers: dict):
+async def get_lead_with_contact_id(
+    lead_id: int, subdomain: str, headers: dict, client_session: ClientSession
+):
     """Получение контактов сделки по id сделки"""
 
-    client_session = aiohttp.ClientSession()
     url = f"https://{subdomain}.amocrm.ru/api/v4/leads/{lead_id}?with=contacts"
 
     async with client_session.get(url, headers=headers) as response:
@@ -100,10 +108,11 @@ async def get_lead_with_contact_id(lead_id: int, subdomain: str, headers: dict):
             return None
 
 
-async def get_contact_by_id(contact_id: int, subdomain: str, headers: dict):
+async def get_contact_by_id(
+    contact_id: int, subdomain: str, headers: dict, client_session: ClientSession
+):
     """Получение объекта контакта по айди контакта"""
 
-    client_session = aiohttp.ClientSession()
     url = f"https://{subdomain}.amocrm.ru/api/v4/contacts/{contact_id}"
 
     async with client_session.get(url, headers=headers) as response:
@@ -115,10 +124,11 @@ async def get_contact_by_id(contact_id: int, subdomain: str, headers: dict):
             return None
 
 
-async def get_responsible_user_contact(contact_id: int, headers: dict, subdomain: str):
+async def get_responsible_user_contact(
+    contact_id: int, headers: dict, subdomain: str, client_session: ClientSession
+):
     """Получение ответственного контакта по id"""
 
-    client_session = aiohttp.ClientSession()
     url = f"https://{subdomain}.amocrm.ru/api/v4/contacts/{contact_id}"
 
     async with client_session.get(url, headers=headers) as response:
@@ -126,14 +136,14 @@ async def get_responsible_user_contact(contact_id: int, headers: dict, subdomain
         return data["responsible_user_id"]
 
 
-async def get_all_contacts(subdomain: str, headers: dict):
+async def get_all_contacts(
+    subdomain: str, headers: dict, client_session: ClientSession
+):
     """Получение всех контактов"""
 
     url = f"https://{subdomain}.amocrm.ru/api/v4/contacts"
-    client_session = aiohttp.ClientSession()
 
     async with client_session.get(url, headers=headers) as response:
-
         if response.status == 200:
             data = await response.json()
             contacts = []
@@ -151,14 +161,14 @@ async def get_all_contacts(subdomain: str, headers: dict):
             return []
 
 
-async def get_lead_with_company_id(lead_id: int, subdomain: str, headers: dict):
+async def get_lead_with_company_id(
+    lead_id: int, subdomain: str, headers: dict, client_session: ClientSession
+):
     """Получение компаний сделки по id сделки"""
 
-    client_session = aiohttp.ClientSession()
     url = f"https://{subdomain}.amocrm.ru/api/v4/leads/{lead_id}?with=companies"
 
     async with client_session.get(url, headers=headers) as response:
-
         if response.status == 200:
             data = await response.json()
             company_id = next(iter(data["_embedded"]["companies"]), {}).get("id", None)
@@ -168,8 +178,11 @@ async def get_lead_with_company_id(lead_id: int, subdomain: str, headers: dict):
             return None
 
 
-async def get_company_by_id(company_id: int, subdomain: str, headers: dict):
-    client_session = aiohttp.ClientSession()
+async def get_company_by_id(
+    company_id: int, subdomain: str, headers: dict, client_session: ClientSession
+):
+    """Получение объкта компании по айди"""
+
     url = f"https://{subdomain}.amocrm.ru/api/v4/companies/{company_id}"
 
     async with client_session.get(url, headers=headers) as response:
@@ -181,10 +194,11 @@ async def get_company_by_id(company_id: int, subdomain: str, headers: dict):
             return None
 
 
-async def get_responsible_user_company(company_id: int, subdomain: str, headers: dict):
+async def get_responsible_user_company(
+    company_id: int, subdomain: str, headers: dict, client_session: ClientSession
+):
     """Получение ответственного компании по id"""
 
-    client_session = aiohttp.ClientSession()
     url = f"https://{subdomain}.amocrm.ru/api/v4/companies/{company_id}"
 
     async with client_session.get(url, headers=headers) as response:
@@ -193,12 +207,13 @@ async def get_responsible_user_company(company_id: int, subdomain: str, headers:
 
 
 async def set_responsible_user_in_lead(
-    lead_ids: list, responsible_user_id: int, subdomain: str, headers: dict
+    lead_ids: list,
+    responsible_user_id: int,
+    subdomain: str,
+    headers: dict,
+    client_session: ClientSession,
 ):
     """Изменение ответственного в сделках по списку сделок"""
-
-    client_session = aiohttp.ClientSession()
-
     url = f"https://{subdomain}.amocrm.ru/api/v4/leads"
 
     # Генерируем список с новым ответственным в сделках
@@ -217,11 +232,14 @@ async def set_responsible_user_in_lead(
 
 
 async def set_responsible_user_in_task_by_lead(
-    lead_ids: list, responsible_user_id: int, subdomain: str, headers: dict
+    lead_ids: list,
+    responsible_user_id: int,
+    subdomain: str,
+    headers: dict,
+    client_session: ClientSession,
 ):
     """Изменение ответственного в задачах по списку сделок"""
 
-    client_session = aiohttp.ClientSession()
     url = f"https://{subdomain}.amocrm.ru/api/v4/tasks"
 
     task_ids = []
