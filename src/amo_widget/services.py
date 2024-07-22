@@ -35,11 +35,13 @@ async def allocation_new_lead(
     data: dict, subdomain: str, headers: dict, client_session: ClientSession
 ):
     """Распределение новой сделки по процентам и максимальному количеству"""
-
+    print("Распределяем сделку по проценту")
     lead_id = data.get("lead_id")
     users_ids = data.get("users_ids")
     percents = data.get("percents")
     max_counts = data.get("max_counts", [])
+    statuses_id = data.get("statuses_id", [])
+    print("ПРОЦЕНТЫ", percents)
     update_tasks = data.get("update_tasks")
 
     lead_to_allocate = await get_lead_by_id(lead_id, subdomain, headers, client_session)
@@ -119,6 +121,10 @@ async def allocation_new_lead_by_contacts(
     contact_id_of_lead = await get_lead_with_contact_id(
         data.lead_id, data.subdomain, headers, client_session
     )
+
+    if contact_id_of_lead is None:
+        return
+
     lead_contact = await get_contact_by_id(
         contact_id_of_lead, data.subdomain, headers, client_session
     )
@@ -171,9 +177,13 @@ async def allocation_new_lead_by_company(
 ):
     """Распределение новой сделки по компании"""
 
-    company_id = await get_lead_with_company_id(
+    company_id = await get_lead_with_company_by_id(
         data.lead_id, data.subdomain, headers, client_session
     )
+
+    if company_id is None:
+        return
+
     lead_company = await get_company_by_id(
         company_id, data.subdomain, headers, client_session
     )

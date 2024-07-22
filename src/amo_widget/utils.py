@@ -1,3 +1,5 @@
+import logging
+
 import pytz
 from typing import AsyncGenerator
 from aiohttp import ClientSession
@@ -48,29 +50,35 @@ async def get_leads_by_filter_async(
 
     url = f"https://{subdomain}.amocrm.ru/api/v4/leads?with=contacts"
 
-    async with client_session.get(url, params=params, headers=headers) as response:
+    try:
+        async with client_session.get(url, params=params, headers=headers) as response:
+            if response.status == 200:
+                result_leads = {}
+                response_json = await response.json()
+                for lead_json in response_json["_embedded"]["leads"]:
+                    contacts = lead_json.get("_embedded", {}).get("contacts", [])
+                    companies = lead_json.get("_embedded", {}).get("companies", [])
+                    contact_id = contacts[0].get("id") if contacts else None
+                    company_id = companies[0].get("id") if companies else None
 
-        if response.status == 200:
-            result_leads = {}
-            response_json = await response.json()
-            for lead_json in response_json["_embedded"]["leads"]:
-                contacts = lead_json.get("_embedded", {}).get("contacts", [])
-                companies = lead_json.get("_embedded", {}).get("companies", [])
-                contact_id = contacts[0].get("id") if contacts else None
-                company_id = companies[0].get("id") if companies else None
+                    result_leads[lead_json.get("id")] = {
+                        "contact_id": contact_id,
+                        "company_id": company_id,
+                    }
+                return result_leads
 
-                result_leads[lead_json.get("id")] = {
-                    "contact_id": contact_id,
-                    "company_id": company_id,
-                }
-            return result_leads
-
-        elif response.status == 204:
-            print(f"Error: {response.status} | Ответ получен без тела")
-            return {}
-        else:
-            print(f"Error: {response.status}")
-            return {}
+            elif response.status == 204:
+                logging.error(f"Error: {response.status} | Ответ получен без тела")
+                return {}
+            else:
+                error_message = await response.text()
+                logging.error(f"Error: {response.status}, Message: {error_message}")
+                raise HTTPException(
+                    status_code=response.status, detail="Failed to fetch leads"
+                )
+    except Exception as e:
+        logging.exception(f"Failed to fetch leads: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 async def get_lead_by_id(
@@ -80,13 +88,21 @@ async def get_lead_by_id(
 
     url = f"https://{subdomain}.amocrm.ru/api/v4/leads/{lead_id}"
 
-    async with client_session.get(url, headers=headers) as response:
-        if response.status == 200:
-            data = await response.json()
-            return data
-        else:
-            print(f"Ошибка: {response.status}")
-            return None
+    try:
+        async with client_session.get(url, headers=headers) as response:
+            if response.status == 200:
+                data = await response.json()
+                return data
+            else:
+                logging.error(
+                    f"Error: {response.status}, Message: {await response.text()}"
+                )
+                raise HTTPException(
+                    status_code=response.status, detail="Failed to fetch lead"
+                )
+    except Exception as e:
+        logging.exception(f"Failed to fetch lead by id: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 async def get_lead_with_contact_id(
@@ -96,16 +112,20 @@ async def get_lead_with_contact_id(
 
     url = f"https://{subdomain}.amocrm.ru/api/v4/leads/{lead_id}?with=contacts"
 
-    async with client_session.get(url, headers=headers) as response:
-
-        if response.status == 200:
+    try:
+        async with client_session.get(url, headers=headers) as response:
             data = await response.json()
-            contact = [contact["id"] for contact in data["_embedded"]["contacts"]][0]
-            print(contact)
-            return contact
-        else:
-            print(f"Ошибка: {response.status}")
-            return None
+            if data["_embedded"]["contacts"]:
+                contact_id = data["_embedded"]["contacts"][0]["id"]
+            else:
+                contact_id = None
+            return contact_id
+
+    except Exception as e:
+        logging.exception(f"Failed to get lead with contacts: {e}")
+        raise HTTPException(
+            status_code=500, detail="Error getting lead contacts from server"
+        )
 
 
 async def get_contact_by_id(
@@ -115,13 +135,21 @@ async def get_contact_by_id(
 
     url = f"https://{subdomain}.amocrm.ru/api/v4/contacts/{contact_id}"
 
-    async with client_session.get(url, headers=headers) as response:
-        if response.status == 200:
-            data = await response.json()
-            return data
-        else:
-            print(f"Ошибка: {response.status}")
-            return None
+    try:
+        async with client_session.get(url, headers=headers) as response:
+            if response.status == 200:
+                data = await response.json()
+                return data
+            else:
+                logging.error(
+                    f"Error: {response.status}, Message: {await response.text()}"
+                )
+                raise HTTPException(
+                    status_code=response.status, detail="Failed to fetch contact"
+                )
+    except Exception as e:
+        logging.exception(f"Failed to fetch contact by id: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch contact by id")
 
 
 async def get_responsible_user_contact(
@@ -131,9 +159,15 @@ async def get_responsible_user_contact(
 
     url = f"https://{subdomain}.amocrm.ru/api/v4/contacts/{contact_id}"
 
-    async with client_session.get(url, headers=headers) as response:
-        data = await response.json()
-        return data["responsible_user_id"]
+    try:
+        async with client_session.get(url, headers=headers) as response:
+            data = await response.json()
+            return data["responsible_user_id"]
+    except Exception as e:
+        logging.exception(f"Failed to get responsible user contact: {e}")
+        raise HTTPException(
+            status_code=500, detail="Failed to get responsible user contact"
+        )
 
 
 async def get_all_contacts(
@@ -143,39 +177,54 @@ async def get_all_contacts(
 
     url = f"https://{subdomain}.amocrm.ru/api/v4/contacts"
 
-    async with client_session.get(url, headers=headers) as response:
-        if response.status == 200:
-            data = await response.json()
-            contacts = []
-            # Формируем список словарей содержащих id контакта и его ответственного
-            for contact in data["_embedded"]["contacts"]:
-                contacts.append(
-                    {
-                        "id": contact["id"],
-                        "responsible_user_id": contact["responsible_user_id"],
-                    }
+    try:
+        async with client_session.get(url, headers=headers) as response:
+            if response.status == 200:
+                data = await response.json()
+                contacts = []
+                # Формируем список словарей содержащих id контакта и его ответственного
+                for contact in data["_embedded"]["contacts"]:
+                    contacts.append(
+                        {
+                            "id": contact["id"],
+                            "responsible_user_id": contact["responsible_user_id"],
+                        }
+                    )
+                return contacts
+            else:
+                logging.error(
+                    f"Error: {response.status}, Message: {await response.text()}"
                 )
-            return contacts
-        else:
-            print(f"Ошибка: {response.status}")
-            return []
+                raise HTTPException(
+                    status_code=response.status, detail="Failed to fetch contacts"
+                )
+    except Exception as e:
+        logging.exception(f"Failed to fetch all contacts: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch all contacts")
 
 
-async def get_lead_with_company_id(
+async def get_lead_with_company_by_id(
     lead_id: int, subdomain: str, headers: dict, client_session: ClientSession
 ):
     """Получение компаний сделки по id сделки"""
 
     url = f"https://{subdomain}.amocrm.ru/api/v4/leads/{lead_id}?with=companies"
 
-    async with client_session.get(url, headers=headers) as response:
-        if response.status == 200:
+    try:
+        async with client_session.get(url, headers=headers) as response:
             data = await response.json()
-            company_id = next(iter(data["_embedded"]["companies"]), {}).get("id", None)
+            print("КОМПАНИИ", data)
+            if data["_embedded"]["companies"]:
+                company_id = data["_embedded"]["companies"][0]["id"]
+            else:
+                company_id = None
             return company_id
-        else:
-            print(f"Ошибка: {response.status}")
-            return None
+
+    except Exception as e:
+        logging.exception(f"Failed to get lead with company: {e}")
+        raise HTTPException(
+            status_code=500, detail="Error getting lead company from server"
+        )
 
 
 async def get_company_by_id(
@@ -185,13 +234,21 @@ async def get_company_by_id(
 
     url = f"https://{subdomain}.amocrm.ru/api/v4/companies/{company_id}"
 
-    async with client_session.get(url, headers=headers) as response:
-        if response.status == 200:
-            data = await response.json()
-            return data
-        else:
-            print(f"Ошибка: {response.status}")
-            return None
+    try:
+        async with client_session.get(url, headers=headers) as response:
+            if response.status == 200:
+                data = await response.json()
+                return data
+            else:
+                logging.error(
+                    f"Error: {response.status}, Message: {await response.text()}"
+                )
+                raise HTTPException(
+                    status_code=response.status, detail="Failed to fetch company"
+                )
+    except Exception as e:
+        logging.exception(f"Failed to fetch company by id: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 async def get_responsible_user_company(
@@ -201,9 +258,13 @@ async def get_responsible_user_company(
 
     url = f"https://{subdomain}.amocrm.ru/api/v4/companies/{company_id}"
 
-    async with client_session.get(url, headers=headers) as response:
-        data = await response.json()
-        return data["responsible_user_id"]
+    try:
+        async with client_session.get(url, headers=headers) as response:
+            data = await response.json()
+            return data["responsible_user_id"]
+    except Exception as e:
+        logging.exception(f"Failed to get responsible user company: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 async def set_responsible_user_in_lead(
@@ -228,7 +289,19 @@ async def set_responsible_user_in_lead(
     )
 
     # Отправляем изменение в amoCRM
-    await client_session.patch(url, headers=headers, data=body)
+    try:
+        async with client_session.patch(url, headers=headers, data=body) as response:
+            if response.status not in [200, 204]:
+                logging.error(
+                    f"Error: {response.status}, Message: {await response.text()}"
+                )
+                raise HTTPException(
+                    status_code=response.status,
+                    detail="Failed to update responsible user in leads",
+                )
+    except Exception as e:
+        logging.exception(f"Failed to update responsible user in leads: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 async def set_responsible_user_in_task_by_lead(
@@ -239,37 +312,47 @@ async def set_responsible_user_in_task_by_lead(
     client_session: ClientSession,
 ):
     """Изменение ответственного в задачах по списку сделок"""
-
     url = f"https://{subdomain}.amocrm.ru/api/v4/tasks"
 
     task_ids = []
 
-    # Достаем id всех задач из переданных сделок
-    for lead_id in lead_ids:
-        params = {"filter[entity_id]": lead_id, "filter[entity_type]": "leads"}
+    try:
+        for lead_id in lead_ids:
+            params = {"filter[entity_id]": lead_id, "filter[entity_type]": "leads"}
 
-        async with client_session.get(url, headers=headers, params=params) as response:
-            result_tasks = await response.json(content_type=None)
+            async with client_session.get(
+                url, headers=headers, params=params
+            ) as response:
+                result_tasks = await response.json(content_type=None)
 
-            if result_tasks is None:
-                continue
+                if result_tasks is None:
+                    continue
 
-            for task_json in result_tasks["_embedded"]["tasks"]:
-                task_ids.append(task_json.get("id"))
+                for task_json in result_tasks["_embedded"]["tasks"]:
+                    task_ids.append(task_json.get("id"))
 
-    # Генерируем список с новым ответственным в задачах
-    body = json.dumps(
-        [
-            {
-                "id": task_id,
-                "responsible_user_id": responsible_user_id,
-            }
-            for task_id in task_ids
-        ]
-    )
+        body = json.dumps(
+            [
+                {
+                    "id": task_id,
+                    "responsible_user_id": responsible_user_id,
+                }
+                for task_id in task_ids
+            ]
+        )
 
-    # Отправляем изменение в amoCRM
-    await client_session.patch(url, headers=headers, data=body)
+        async with client_session.patch(url, headers=headers, data=body) as response:
+            if response.status not in [200, 204]:
+                logging.error(
+                    f"Error: {response.status}, Message: {await response.text()}"
+                )
+                raise HTTPException(
+                    status_code=response.status,
+                    detail="Failed to update responsible user in tasks",
+                )
+    except Exception as e:
+        logging.exception(f"Failed to update responsible user in tasks: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 async def get_tokens_from_db(subdomain: str, session: AsyncSession):

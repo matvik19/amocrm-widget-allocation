@@ -19,29 +19,31 @@ async def config_widget(
     client_session: ClientSession = Depends(get_client_session),
 ):
     """Настройка виджета (триггера)"""
+    try:
+        await initialize_token(data.client_id, data.subdomain, session)
 
-    await initialize_token(data.client_id, data.subdomain, session)
+        params = data.dict()
 
-    params = data.dict()
+        tokens = await get_tokens_from_db(data.subdomain, session)
+        access_token = tokens[0]
 
-    tokens = await get_tokens_from_db(data.subdomain, session)
-    access_token = tokens[0]
+        headers = await get_headers(data.subdomain, access_token)
 
-    headers = await get_headers(data.subdomain, access_token)
+        await allocation_new_lead(params, data.subdomain, headers, client_session)
+        print("Вышли из распределение процентов")
 
-    await allocation_new_lead(params, data.subdomain, headers, client_session)
-    print("Вышли из распределение процентов")
+        if data.use_contact:
+            print("Зашли в распределение по контакту")
+            await allocation_new_lead_by_contacts(
+                AllocationNewLeadByCompanyContacts(**params), headers, client_session
+            )
 
-    if data.use_contact:
-        print("Зашли в распределение по контакту")
-        await allocation_new_lead_by_contacts(
-            AllocationNewLeadByCompanyContacts(**params), headers, client_session
-        )
-
-    if data.use_company:
-        await allocation_new_lead_by_company(
-            AllocationNewLeadByCompanyContacts(**params), headers, client_session
-        )
+        if data.use_company:
+            await allocation_new_lead_by_company(
+                AllocationNewLeadByCompanyContacts(**params), headers, client_session
+            )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # @router.get("/get")
