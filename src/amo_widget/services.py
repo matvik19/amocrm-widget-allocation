@@ -211,9 +211,9 @@ async def allocation_new_lead(
             await allocation_new_lead_by_percent_or_max_count(
                 data, subdomain, headers, client_session
             )
+            lead = await get_lead_by_id(lead_id, subdomain, headers, client_session)
 
             if update_contacts:
-                lead = await get_lead_by_id(lead_id, subdomain, headers, client_session)
                 await set_responsible_user_in_contact_by_lead(
                     contact_id=contact_id,
                     responsible_user_id=lead["responsible_user_id"],
@@ -222,15 +222,15 @@ async def allocation_new_lead(
                     client_session=client_session,
                 )
 
-            # if update_companies:
-            #     print("Меняем отвествеенного в компании")
-            #     await set_responsible_user_in_company_by_lead(
-            #         company_id=lead["_embedded"]["companies"][0]["id"],
-            #         responsible_user_id=lead["responsible_user_id"],
-            #         subdomain=subdomain,
-            #         headers=headers,
-            #         client_session=client_session,
-            #     )
+            if update_companies:
+                print("Меняем отвествеенного в компании")
+                await set_responsible_user_in_company_by_lead(
+                    company_id=lead["_embedded"]["companies"][0]["id"],
+                    responsible_user_id=lead["responsible_user_id"],
+                    subdomain=subdomain,
+                    headers=headers,
+                    client_session=client_session,
+                )
 
             if update_tasks:
                 await set_responsible_user_in_task_by_lead(
