@@ -29,21 +29,36 @@ async def config_widget(
 
         headers = await get_headers(data.subdomain, access_token)
 
-        await allocation_new_lead(params, data.subdomain, headers, client_session)
-        print("Вышли из распределение процентов")
-
-        if data.use_contact:
-            print("Зашли в распределение по контакту")
+        if data.max_counts:
+            print("Зашли в условие if data.max_counts")
+            await allocation_new_lead(params, data.subdomain, headers, client_session)
+            print("Вышли из allocation_new_lead")
+        else:
             await allocation_new_lead_by_contacts(
                 AllocationNewLeadByCompanyContacts(**params), headers, client_session
             )
 
-        if data.use_company:
             await allocation_new_lead_by_company(
                 AllocationNewLeadByCompanyContacts(**params), headers, client_session
             )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/pipe")
+async def pipe(session: AsyncSession = Depends(get_async_session)):
+    await initialize_token(
+        "7efaf2b3-bcb3-48fd-9d9f-b5ee4b4d16a1", "shcherbaev", session
+    )
+    p = Pipeline.objects.get(object_id=8319714)
+
+    for emp in get_my_employments():
+        print(emp.id, emp.name)
+
+    print("##############################")
+
+    for status in p.statuses:
+        print(status.id, status.name)
 
 
 # @router.get("/get")

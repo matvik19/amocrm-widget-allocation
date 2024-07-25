@@ -21,7 +21,7 @@ app.add_middleware(
 app.include_router(router_widget)
 app.include_router(router_users)
 
-
+#
 # @app.on_event("startup")
 # async def startup_event():
 #     print("Запустились")

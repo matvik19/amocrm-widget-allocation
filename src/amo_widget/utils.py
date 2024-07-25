@@ -30,7 +30,7 @@ async def get_leads_by_filter_async(
     subdomain: str,
     headers: dict,
     pipeline_id: int,
-    status_id: int = None,
+    statuses_ids: List[int] = None,
     responsible_user_id: int = None,
 ) -> dict:
     """Асинхронное получение сделок с помощью фильтра"""
@@ -39,12 +39,13 @@ async def get_leads_by_filter_async(
     FILTERS:
         filter[responsible_user_id] - по ответственному
         filter[pipeline_id] - по воронке
-        filter[status] - по статусу
+        filter[statuses][] - по статусам
     """
 
     params = {"filter[pipeline_id]": pipeline_id}
-    if status_id:
-        params["filter[status]"] = status_id
+    if statuses_ids:
+        for i, status_id in enumerate(statuses_ids):
+            params[f"filter[statuses][{i}]"] = status_id
     if responsible_user_id:
         params["filter[responsible_user_id]"] = responsible_user_id
 
@@ -79,6 +80,62 @@ async def get_leads_by_filter_async(
     except Exception as e:
         logging.exception(f"Failed to fetch leads: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# async def get_leads_by_filter_async(
+#     client_session: ClientSession,
+#     subdomain: str,
+#     headers: dict,
+#     pipeline_id: int,
+#     status_id: int = None,
+#     responsible_user_id: int = None,
+# ) -> dict:
+#     """Асинхронное получение сделок с помощью фильтра"""
+#
+#     """
+#     FILTERS:
+#         filter[responsible_user_id] - по ответственному
+#         filter[pipeline_id] - по воронке
+#         filter[status] - по статусу
+#     """
+#
+#     params = {"filter[pipeline_id]": pipeline_id}
+#     if status_id:
+#         params["filter[status]"] = status_id
+#     if responsible_user_id:
+#         params["filter[responsible_user_id]"] = responsible_user_id
+#
+#     url = f"https://{subdomain}.amocrm.ru/api/v4/leads?with=contacts"
+#
+#     try:
+#         async with client_session.get(url, params=params, headers=headers) as response:
+#             if response.status == 200:
+#                 result_leads = {}
+#                 response_json = await response.json()
+#                 for lead_json in response_json["_embedded"]["leads"]:
+#                     contacts = lead_json.get("_embedded", {}).get("contacts", [])
+#                     companies = lead_json.get("_embedded", {}).get("companies", [])
+#                     contact_id = contacts[0].get("id") if contacts else None
+#                     company_id = companies[0].get("id") if companies else None
+#
+#                     result_leads[lead_json.get("id")] = {
+#                         "contact_id": contact_id,
+#                         "company_id": company_id,
+#                     }
+#                 return result_leads
+#
+#             elif response.status == 204:
+#                 logging.error(f"Error: {response.status} | Ответ получен без тела")
+#                 return {}
+#             else:
+#                 error_message = await response.text()
+#                 logging.error(f"Error: {response.status}, Message: {error_message}")
+#                 raise HTTPException(
+#                     status_code=response.status, detail="Failed to fetch leads"
+#                 )
+#     except Exception as e:
+#         logging.exception(f"Failed to fetch leads: {e}")
+#         raise HTTPException(status_code=500, detail="Internal server error")
 
 
 async def get_lead_by_id(
@@ -331,6 +388,9 @@ async def set_responsible_user_in_task_by_lead(
                 for task_json in result_tasks["_embedded"]["tasks"]:
                     task_ids.append(task_json.get("id"))
 
+        if not task_ids:
+            return None
+
         body = json.dumps(
             [
                 {
@@ -353,6 +413,64 @@ async def set_responsible_user_in_task_by_lead(
     except Exception as e:
         logging.exception(f"Failed to update responsible user in tasks: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+async def set_responsible_user_in_contact_by_lead(
+    contact_id: int,
+    responsible_user_id: int,
+    subdomain: str,
+    headers: dict,
+    client_session: ClientSession,
+):
+    url = f"https://{subdomain}.amocrm.ru/api/v4/contacts/{contact_id}"
+
+    body = json.dumps({"id": contact_id, "responsible_user_id": responsible_user_id})
+
+    # Отправляем изменение в amoCRM
+    try:
+        async with client_session.patch(url, headers=headers, data=body) as response:
+            if response.status not in [200, 204]:
+                logging.error(
+                    f"Error: {response.status}, Message: {await response.text()}"
+                )
+                raise HTTPException(
+                    status_code=response.status,
+                    detail="Failed to update responsible user in contact",
+                )
+    except Exception as e:
+        logging.exception(f"Failed to update responsible user in contact: {e}")
+        raise HTTPException(
+            status_code=500, detail="Failed to update responsible user in contact"
+        )
+
+
+async def set_responsible_user_in_company_by_lead(
+    company_id: int,
+    responsible_user_id: int,
+    subdomain: str,
+    headers: dict,
+    client_session: ClientSession,
+):
+    url = f"https://{subdomain}.amocrm.ru/api/v4/companies/{company_id}"
+
+    body = json.dumps({"id": company_id, "responsible_user_id": responsible_user_id})
+
+    # Отправляем изменение в amoCRM
+    try:
+        async with client_session.patch(url, headers=headers, data=body) as response:
+            if response.status not in [200, 204]:
+                logging.error(
+                    f"Error: {response.status}, Message: {await response.text()}"
+                )
+                raise HTTPException(
+                    status_code=response.status,
+                    detail="Failed to update responsible user in contact",
+                )
+    except Exception as e:
+        logging.exception(f"Failed to update responsible user in contact: {e}")
+        raise HTTPException(
+            status_code=500, detail="Failed to update responsible user in contact"
+        )
 
 
 async def get_tokens_from_db(subdomain: str, session: AsyncSession):
@@ -412,14 +530,3 @@ def give_all_tasks_to_responsible_user(new_responsible_user: User, lead: Lead):
     for task in lead.tasks:
         task.responsible_user = new_responsible_user
         task.save()
-
-
-def is_timestamp_within_range(created_at: int) -> bool:
-    current_time = datetime.now(pytz.UTC)
-    print(current_time)
-    created_at_time = datetime.fromtimestamp(created_at, pytz.UTC)
-    print(created_at_time)
-    time_difference = current_time - created_at_time
-    print("Разница во времени", abs(time_difference))
-
-    return abs(time_difference) <= timedelta(seconds=30)
