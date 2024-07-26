@@ -3,8 +3,8 @@ from amocrm.v2 import tokens
 from amocrm.v2.tokens import MemoryTokensStorage
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.amo_widget.utils import get_tokens_from_db
 from src.config import CLIENT_ID, CLIENT_SECRET, REDIRECT_URL
-from .utils import get_tokens_from_db
 
 
 async def initialize_token(client_id: str, subdomain: str, session: AsyncSession):

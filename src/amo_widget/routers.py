@@ -7,12 +7,13 @@ from starlette.concurrency import run_in_threadpool
 from .schemas import *
 from src.amo_widget.token_init import initialize_token
 from .services import *
+from .utils import get_tokens_from_db, get_headers
 from ..database import get_async_session
 
 router = APIRouter(prefix="/widget", tags=["Widget"])
 
 
-@router.patch("/config_widget")
+@router.patch("/config_widget", response_model=ConfigResponse)
 async def config_widget(
     data: ConfigWidgetBody,
     session: AsyncSession = Depends(get_async_session),
@@ -29,79 +30,76 @@ async def config_widget(
 
         headers = await get_headers(data.subdomain, access_token)
 
-        if data.max_counts:
-            print("Зашли в условие if data.max_counts")
-            await allocation_new_lead(params, data.subdomain, headers, client_session)
-            print("Вышли из allocation_new_lead")
-        else:
-            await allocation_new_lead_by_contacts(
-                AllocationNewLeadByCompanyContacts(**params), headers, client_session
+        if data.ignore_manager:
+            await allocation_new_lead_by_contact_company(
+                params, headers, client_session
             )
-
-            await allocation_new_lead_by_company(
-                AllocationNewLeadByCompanyContacts(**params), headers, client_session
+            return ConfigResponse(
+                status="success",
+                lead_id=data.lead_id,
+                massage="The distribution was successful, taking into account contacts and companies",
+            )
+        else:
+            await allocation_new_lead(params, headers, client_session)
+            return ConfigResponse(
+                status="success",
+                lead_id=data.lead_id,
+                massage="The distribution was successful without taking into account contacts and companies",
             )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/pipe")
-async def pipe(session: AsyncSession = Depends(get_async_session)):
-    await initialize_token(
-        "7efaf2b3-bcb3-48fd-9d9f-b5ee4b4d16a1", "shcherbaev", session
-    )
-    p = Pipeline.objects.get(object_id=8319714)
+@router.get("/get")
+async def get(
+    client_id: str,
+    subdomain: str,
+    session: AsyncSession = Depends(get_async_session),
+    client_session: ClientSession = Depends(get_client_session),
+):
+    try:
+        tokens = await get_tokens_from_db(subdomain, session)
+        access_token = tokens[0]
+        headers = await get_headers(subdomain, access_token)
+        await initialize_token(client_id, subdomain, session)
 
-    for emp in get_my_employments():
-        print(emp.id, emp.name)
+        lead = await get_lead_by_id(17539645, subdomain, headers, client_session)
+        contacts = lead["_embedded"]["contacts"]
 
-    print("##############################")
+        # print("СДЕЛКА", lead)
+        # print("АЙДИ КОНТАКТА СДЕЛКИ:", lead["_embedded"]["contacts"])
 
-    for status in p.statuses:
-        print(status.id, status.name)
+        # leads_andrey = await get_leads_by_filter_async(
+        #     subdomain,
+        #     headers,
+        #     responsible_user_id=11317986,
+        #     pipeline_id=8430722,
+        #     status_id=68604810,
+        # )
+        # leads_dmitry = await get_leads_by_filter_async(
+        #     subdomain,
+        #     headers,
+        #     responsible_user_id=9606738,
+        #     pipeline_id=8319714,
+        #     status_id=67829730,
+        # )
+        # leads_in_pipeline = await get_leads_by_filter_async(
+        #     subdomain, headers, pipeline_id=8319714, status_id=67829730
+        # )
+        #
+        # print("ВСЕГО СДЕЛОК:", len(leads_in_pipeline))
+        # print("СДЕЛОК У АНДРЕЯ:", len(leads_andrey))
+        # print("СДЕЛОК У ДМИТРИЯ:", len(leads_dmitry))
+        #
+        # return {
+        #     "status": "success",
+        #     "message": None,
+        #     "data": {
+        #         "leads_andrey": leads_andrey,
+        #         "leads_dmitry": leads_dmitry,
+        #         "leads_in_pipeline": leads_in_pipeline,
+        #     },
+        # }
 
-
-# @router.get("/get")
-# async def get(
-#     client_id: str, subdomain: str, session: AsyncSession = Depends(get_async_session)
-# ):
-#     try:
-#         tokens = await get_tokens_from_db(subdomain, session)
-#         access_token = tokens[0]
-#         headers = await get_headers(subdomain, access_token)
-#         await initialize_token(client_id, subdomain, session)
-#
-#         leads_andrey = await get_leads_by_filter_async(
-#             subdomain,
-#             headers,
-#             responsible_user_id=5837446,
-#             pipeline_id=8319714,
-#             status_id=67829730,
-#         )
-#         leads_dmitry = await get_leads_by_filter_async(
-#             subdomain,
-#             headers,
-#             responsible_user_id=9606738,
-#             pipeline_id=8319714,
-#             status_id=67829730,
-#         )
-#         leads_in_pipeline = await get_leads_by_filter_async(
-#             subdomain, headers, pipeline_id=8319714, status_id=67829730
-#         )
-#
-#         print("ВСЕГО СДЕЛОК:", len(leads_in_pipeline))
-#         print("СДЕЛОК У АНДРЕЯ:", len(leads_andrey))
-#         print("СДЕЛОК У ДМИТРИЯ:", len(leads_dmitry))
-#
-#         return {
-#             "status": "success",
-#             "message": None,
-#             "data": {
-#                 "leads_andrey": leads_andrey,
-#                 "leads_dmitry": leads_dmitry,
-#                 "leads_in_pipeline": leads_in_pipeline,
-#             },
-#         }
-#
-#     except ValueError as e:
-#         raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
