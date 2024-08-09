@@ -32,7 +32,7 @@ async def initialize_token_manager(client_id, subdomain, code):
     storage = tokens.MemoryTokensStorage()
     tokens.default_token_manager(
         client_id=client_id,
-        client_secret=CLIENT_SECRET,
+        client_secret="6rL6y0aNdQR3XkfTzPto6WRiXXxZUwb2i5zmZptzVbnEg90m4ydlQVWBsbNifdeX",
         subdomain=subdomain,
         redirect_url=REDIRECT_URL,
         storage=storage,

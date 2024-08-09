@@ -1,7 +1,8 @@
 import datetime
 
-from amocrm.v2.entity.note import _Note
+from amocrm.v2 import Pipeline
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from .schemas import *
@@ -31,6 +32,7 @@ async def config_widget(
         headers = await get_headers(data.subdomain, access_token)
 
         if data.ignore_manager:
+            print("Зашли в распределение")
             await allocation_new_lead_by_contact_company(
                 params, headers, client_session
             )
@@ -44,7 +46,7 @@ async def config_widget(
             return ConfigResponse(
                 status="success",
                 lead_id=data.lead_id,
-                massage="The distribution was successful without taking into account contacts and companies",
+                message="The distribution was successful without taking into account contacts and companies",
             )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -63,8 +65,12 @@ async def get(
         headers = await get_headers(subdomain, access_token)
         await initialize_token(client_id, subdomain, session)
 
-        lead = await get_lead_by_id(17539645, subdomain, headers, client_session)
-        contacts = lead["_embedded"]["contacts"]
+        # lead = await get_lead_by_id(17539645, subdomain, headers, client_session)
+        # contacts = lead["_embedded"]["contacts"]
+
+        p = Pipeline.objects.get(object_id=7991514)
+        for s in p.statuses:
+            print(s.id, s.name)
 
         # print("СДЕЛКА", lead)
         # print("АЙДИ КОНТАКТА СДЕЛКИ:", lead["_embedded"]["contacts"])

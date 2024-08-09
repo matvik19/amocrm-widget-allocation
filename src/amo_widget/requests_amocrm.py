@@ -1,6 +1,7 @@
 import logging
 
 from typing import AsyncGenerator
+
 from aiohttp import ClientSession
 from fastapi import HTTPException
 
@@ -14,6 +15,8 @@ from src.config import *
 
 
 async def get_client_session() -> AsyncGenerator[aiohttp.ClientSession, None]:
+    """Асинхронная ссесия для запросов к амо"""
+
     async with aiohttp.ClientSession() as session:
         yield session
 
@@ -25,20 +28,20 @@ async def get_leads_by_filter_async(
     pipeline_id: int,
     statuses_ids: List[int] = None,
     responsible_user_id: int = None,
-) -> dict:
+) -> List[dict]:
     """Асинхронное получение сделок с помощью фильтра"""
 
     """
     FILTERS:
         filter[responsible_user_id] - по ответственному
         filter[pipeline_id] - по воронке
-        filter[statuses][] - по статусам
+        filter[status][] - по статусам
     """
 
     params = {"filter[pipeline_id]": pipeline_id}
     if statuses_ids:
         for i, status_id in enumerate(statuses_ids):
-            params[f"filter[statuses][{i}]"] = status_id
+            params[f"filter[status][{i}]"] = status_id
     if responsible_user_id:
         params["filter[responsible_user_id]"] = responsible_user_id
 
@@ -47,23 +50,15 @@ async def get_leads_by_filter_async(
     try:
         async with client_session.get(url, params=params, headers=headers) as response:
             if response.status == 200:
-                result_leads = {}
                 response_json = await response.json()
-                for lead_json in response_json["_embedded"]["leads"]:
-                    contacts = lead_json.get("_embedded", {}).get("contacts", [])
-                    companies = lead_json.get("_embedded", {}).get("companies", [])
-                    contact_id = contacts[0].get("id") if contacts else None
-                    company_id = companies[0].get("id") if companies else None
 
-                    result_leads[lead_json.get("id")] = {
-                        "contact_id": contact_id,
-                        "company_id": company_id,
-                    }
-                return result_leads
+                # Извлекаем список сделок из ответа JSON
+                leads = response_json.get("_embedded", {}).get("leads", [])
+                return leads
 
             elif response.status == 204:
                 logging.error(f"Error: {response.status} | Ответ получен без тела")
-                return {}
+                return []
             else:
                 error_message = await response.text()
                 logging.error(f"Error: {response.status}, Message: {error_message}")
@@ -154,7 +149,7 @@ async def get_all_contacts(
 async def get_company_by_id(
     company_id: int, subdomain: str, headers: dict, client_session: ClientSession
 ):
-    """Получение объкта компании по айди"""
+    """Получение объкта компании по id"""
 
     url = f"https://{subdomain}.amocrm.ru/api/v4/companies/{company_id}"
 
@@ -182,7 +177,8 @@ async def set_responsible_user_in_lead(
     headers: dict,
     client_session: ClientSession,
 ):
-    """Изменение ответственного в одной сделке"""
+    """Назначить ответственного в сделке"""
+
     url = f"https://{subdomain}.amocrm.ru/api/v4/leads/{lead_id}"
 
     body = json.dumps({"responsible_user_id": responsible_user_id})
@@ -210,6 +206,8 @@ async def set_responsible_user_in_task_by_lead(
     headers: dict,
     client_session: ClientSession,
 ):
+    """Назначить ответственного в задаче конкретной сделки"""
+
     url = f"https://{subdomain}.amocrm.ru/api/v4/tasks"
 
     try:
@@ -268,6 +266,8 @@ async def set_responsible_user_in_contact_by_lead(
     headers: dict,
     client_session: ClientSession,
 ):
+    """Назначить ответственного за контакт"""
+
     url = f"https://{subdomain}.amocrm.ru/api/v4/contacts/{contact_id}"
 
     body = json.dumps({"id": contact_id, "responsible_user_id": responsible_user_id})
@@ -300,6 +300,8 @@ async def set_responsible_user_in_company_by_lead(
     headers: dict,
     client_session: ClientSession,
 ):
+    """Назначить ответственного за компанию"""
+
     url = f"https://{subdomain}.amocrm.ru/api/v4/companies/{company_id}"
 
     body = json.dumps({"id": company_id, "responsible_user_id": responsible_user_id})
@@ -327,11 +329,13 @@ async def set_responsible_user_in_company_by_lead(
 
 def get_my_employments():
     """Получение всех сотрудников"""
+
     return [emp for emp in User.objects.all() if emp.is_active]
 
 
 def get_info_about_tasks_by_lead(lead: Lead):
     """Получение всей информации о задачах сделки"""
+
     tasks = lead.tasks
     print("ЗАДАЧИ")
     for t in tasks:
@@ -343,6 +347,7 @@ def get_info_about_tasks_by_lead(lead: Lead):
 
 def print_employments():
     """Вывод все сотрудников"""
+
     print("Сотрудники")
     for emp in get_my_employments():
         print(emp.id, emp.name)
