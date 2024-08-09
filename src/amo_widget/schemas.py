@@ -58,12 +58,12 @@ class ConfigWidgetBody(BaseModel):
     accept_to_existing_leads: bool
 
     # Данные для распределения
-    schedule: List[int]
-    users_ids: List[int]
-    percents: List[int]
-    statuses_ids: List[int]
-    max_counts: List[int] | None
-    ignore_manager: int
+    schedule: List[int] = []
+    users_ids: List[int] = []
+    percents: List[int] = []
+    pipelines_statuses: Dict[int, List[int]] = {}
+    max_counts: List[int] = []
+    ignore_manager: Optional[int] = None
     status_id: int
     pipeline_id: int
     lead_id: int
