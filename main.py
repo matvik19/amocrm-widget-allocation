@@ -1,10 +1,12 @@
 import uvicorn
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
+from redis import asyncio as aioredis
 
 from src.amo_widget.token_init import initialize_token
 from src.amo_widget.routers import router as router_widget
 from src.users.routers import router as router_users
+from src.managers.routers import router as managers
 from tasks import activate_background_task
 
 app = FastAPI(title="Allocation widget")
@@ -20,8 +22,9 @@ app.add_middleware(
 
 app.include_router(router_widget)
 app.include_router(router_users)
+app.include_router(managers)
 
-#
+
 # @app.on_event("startup")
 # async def startup_event():
 #     print("Запустились")
