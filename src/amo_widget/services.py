@@ -3,17 +3,15 @@ import logging
 from typing import Tuple
 
 from aiohttp import ClientSession
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from .requests_amocrm import *
 from .schemas import AllocationNewLeadByCompanyContacts
-from ..database import get_async_session
 
 
 async def allocate_by_percent(
     data, user_leads_counts, all_leads_count, headers, client_session
 ):
+    """Распределние по процентам с учетом максимального кол-ва"""
 
     subdomain = data.get("subdomain")
     lead_id = data.get("lead_id")
@@ -38,6 +36,8 @@ async def allocate_by_percent(
 
 
 async def allocate_by_max_count(data, user_leads_counts, headers, client_session):
+    """Распределние по максимальному кол-ву"""
+
     subdomain = data.get("subdomain")
     lead_id = data.get("lead_id")
     users_ids = data.get("users_ids")
@@ -60,29 +60,93 @@ async def allocation_new_lead_by_percent_or_max_count(
     data: dict, headers: dict, client_session: ClientSession
 ):
     """Распределение новой сделки по процентам и максимальному количеству"""
+
     try:
         subdomain = data.get("subdomain")
         users_ids = data.get("users_ids")
-        statuses_ids = data.get("statuses_ids", [])
-        status_id_lead = data.get("status_id")
-        pipeline_id = data.get("pipeline_id")
+        pipelines_statuses = data.get("pipelines_statuses", {})
+        default_status_id = data.get("status_id")
+        default_pipeline_id = data.get("pipeline_id")
 
-        all_leads = list(
-            (
-                await get_leads_by_filter_async(
+        all_leads_count = 0
+        user_leads_counts = {user_id: 0 for user_id in users_ids}
+
+        if pipelines_statuses:
+            print("Воронки и статусы: ", pipelines_statuses)
+            # Считаем количество сделок по каждой воронке и статусу из pipelines_statuses
+            for pipeline_id, statuses_ids in pipelines_statuses.items():
+                print("Считаем сделки на воронке с id: ", pipeline_id)
+                print("Статусы которые нам пришли id: ", statuses_ids)
+
+                # Получаем все сделки для текущей воронки и статусов
+                leads = await get_leads_by_filter_async(
                     client_session,
                     subdomain,
                     headers,
                     pipeline_id=pipeline_id,
-                    statuses_ids=[status_id_lead],
+                    statuses_ids=statuses_ids,
                 )
-            ).keys()
-        )
-        all_leads_count = len(all_leads)
+                print(
+                    f"Список сделок в воронке с id {pipeline_id} со статусами {statuses_ids}||: {leads}"
+                )
+                print("***********************************************")
+                all_leads_count += len(leads)
+                print(
+                    f"Количество сделок на этапах {statuses_ids} в воронке {pipeline_id}: {all_leads_count}"
+                )
 
-        user_leads_counts = await get_user_leads_counts(
-            users_ids, pipeline_id, subdomain, headers, client_session, statuses_ids
-        )
+                # Получаем количество сделок для пользователей по текущей воронке и статусам
+                user_leads_counts_in_pipeline_with_statuses = (
+                    await get_user_leads_counts(
+                        users_ids,
+                        pipeline_id,
+                        subdomain,
+                        headers,
+                        client_session,
+                        statuses_ids,
+                    )
+                )
+                print(
+                    f"Пользователи {users_ids}, имеют сделок на {pipeline_id}:"
+                    f"{user_leads_counts_in_pipeline_with_statuses}"
+                )
+
+                # Обновляем общее количество сделок для пользователей
+                for (
+                    user_id,
+                    count,
+                ) in user_leads_counts_in_pipeline_with_statuses.items():
+                    user_leads_counts[user_id] += count
+
+                print(
+                    f"Обновленное количество сдeлок для пользователя: {user_leads_counts}"
+                )
+        else:
+            print("ЗАШЛИ В ELSE!!!")
+            # Получаем все сделки для одной воронки и одного статуса
+            leads = await get_leads_by_filter_async(
+                client_session,
+                subdomain,
+                headers,
+                pipeline_id=default_pipeline_id,
+                statuses_ids=[default_status_id],
+            )
+            all_leads_count = len(leads)
+
+            # Получаем количество сделок для пользователей по одной воронке и одному статусу
+            user_leads_counts = await get_user_leads_counts(
+                users_ids,
+                default_pipeline_id,
+                subdomain,
+                headers,
+                client_session,
+                [default_status_id],
+            )
+            print("user_leads_counts", user_leads_counts)
+
+        print(f"Total leads count: {all_leads_count}")
+        print(f"User leads counts: {user_leads_counts}")
+
         # Попытка распределения по процентам
         allocation_result = await allocate_by_percent(
             data,
@@ -121,7 +185,7 @@ async def allocation_new_lead_by_contacts(
     headers: dict,
     client_session: ClientSession,
 ):
-    """Распределение новой сделки по контакту"""
+    """Распределение сделки по контакту"""
 
     lead = await get_lead_by_id(data.lead_id, data.subdomain, headers, client_session)
     contacts_lead = lead["_embedded"]["contacts"]
@@ -149,11 +213,11 @@ async def allocation_new_lead_by_company(
     headers: dict,
     client_session: ClientSession,
 ):
-    """Распределение новой сделки по компании"""
+    """Распределение сделки по компании"""
 
     lead = await get_lead_by_id(data.lead_id, data.subdomain, headers, client_session)
 
-    if lead["_embedded"]["companies"][0]:
+    if lead["_embedded"]["companies"]:
         company_id = lead["_embedded"]["companies"][0]["id"]
         company = await get_company_by_id(
             company_id, data.subdomain, headers, client_session
@@ -174,6 +238,7 @@ async def get_info_about_lead_contact(
     data: dict, headers: dict, client_session: ClientSession
 ):
     """Получить информацию о контакте сделки"""
+
     try:
         lead_id = data.get("lead_id")
         subdomain = data.get("subdomain")
@@ -201,26 +266,35 @@ async def get_info_about_lead_contact(
 async def allocation_new_lead_by_contact_company(
     data: dict, headers: dict, client_session: ClientSession
 ):
-    contact_id, contact_lead = await get_info_about_lead_contact(
-        data, headers, client_session
-    )
+    """Объединение распределений в зависимости от настроек полученных с триггера"""
+    try:
+        contact_id, contact_lead = await get_info_about_lead_contact(
+            data, headers, client_session
+        )
 
-    if data.get("ignore_manager") == contact_lead["responsible_user_id"]:
-        if data.get("max_counts"):
-            await allocation_new_lead_by_percent_or_max_count(
-                data, headers, client_session
-            )
+        if data.get("ignore_manager") == contact_lead["responsible_user_id"]:
+            print("Прошли условие ignore_manager")
+            if data.get("percents") or data.get("max_counts"):
+                print("Зашли в конкретное распределение")
+                await allocation_new_lead_by_percent_or_max_count(
+                    data, headers, client_session
+                )
+            else:
+                await default_allocation_by_schedule(data, headers, client_session)
         else:
-            await default_allocation_by_schedule(data, headers, client_session)
-    else:
-        await allocate_lead_by_company_or_contacts(data, headers, client_session)
+            await allocate_lead_by_company_or_contacts(data, headers, client_session)
 
-    await update_responsible_in_dependent_entities(
-        data, contact_id, headers, client_session
-    )
+        await update_responsible_in_dependent_entities(
+            data, contact_id, headers, client_session
+        )
+    except Exception as e:
+        print(f"Exception occurred: {str(e)}")
+        logging.exception("Error in allocation_new_lead_by_contact_company")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 async def allocation_new_lead(data: dict, headers: dict, client_session: ClientSession):
+    """Распределение по мнедежрам из таблицы распределения (если она есть), либо из графика"""
     contact_id, contact_lead = await get_info_about_lead_contact(
         data, headers, client_session
     )
@@ -238,7 +312,7 @@ async def allocation_new_lead(data: dict, headers: dict, client_session: ClientS
 async def default_allocation_by_schedule(
     data: dict, headers: dict, client_session: ClientSession
 ):
-    """Распределение новой сделки в равных долях между пользователями с графика"""
+    """Распределение новой сделки в равных долях между пользователями из графика"""
 
     subdomain = data.get("subdomain")
     lead_id = data.get("lead_id")
@@ -254,7 +328,6 @@ async def default_allocation_by_schedule(
 
     user_id = min(user_leads_counts, key=user_leads_counts.get)
 
-    # Назначаем сделку этому пользователю
     await set_responsible_user_in_lead(
         lead_id, user_id, subdomain, headers, client_session
     )
@@ -278,7 +351,7 @@ async def get_user_leads_counts(
     client_session: ClientSession,
     statuses_ids: List[int] = None,
 ):
-    """Получение кол-ва сделок пользователя"""
+    """Получение кол-ва сделок пользователя на конкретном этапе"""
 
     user_leads_counts = {}
     for user_id in users_ids:
@@ -290,6 +363,7 @@ async def get_user_leads_counts(
             statuses_ids=statuses_ids,
             responsible_user_id=user_id,
         )
+        print(user_leads)
         user_leads_counts[user_id] = len(user_leads)
     return user_leads_counts
 
@@ -300,6 +374,8 @@ async def update_responsible_in_dependent_entities(
     headers: dict,
     client_session: ClientSession,
 ):
+    """Ответсвенный за сделку назначается ответсвенным за определенные сущности, которые пришли из триггера"""
+
     lead_id = data.get("lead_id")
     subdomain = data.get("subdomain")
 
@@ -315,14 +391,14 @@ async def update_responsible_in_dependent_entities(
         )
 
     if data.get("update_companies"):
-        company_id = lead["_embedded"]["companies"][0]["id"]
-        await set_responsible_user_in_company_by_lead(
-            company_id=company_id,
-            responsible_user_id=lead["responsible_user_id"],
-            subdomain=subdomain,
-            headers=headers,
-            client_session=client_session,
-        )
+        if lead["_embedded"]["companies"]:
+            await set_responsible_user_in_company_by_lead(
+                company_id=lead["_embedded"]["companies"][0]["id"],
+                responsible_user_id=lead["responsible_user_id"],
+                subdomain=subdomain,
+                headers=headers,
+                client_session=client_session,
+            )
 
     if data.get("update_tasks"):
         await set_responsible_user_in_task_by_lead(
@@ -338,6 +414,7 @@ async def allocate_lead_by_company_or_contacts(
     data: dict, headers: dict, client_session: ClientSession
 ):
     """Распределить сделку по компании(если есть) или по контакту(если нет компании)"""
+
     allocation_result = await allocation_new_lead_by_company(
         AllocationNewLeadByCompanyContacts(**data), headers, client_session
     )
